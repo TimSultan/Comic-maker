@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { resolveImageUrl } from '../utils/imageStore'
+import { logEvent } from '../utils/debugLog'
 
 export default function PanelImage({ src, assetId = null, offsetX = 0, offsetY = 0, scale = 1, alt = '' }) {
   const frameRef = useRef(null)
@@ -35,7 +36,7 @@ export default function PanelImage({ src, assetId = null, offsetX = 0, offsetY =
     const observer = new ResizeObserver(updateSize)
     observer.observe(frame)
     return () => observer.disconnect()
-  }, [])
+  }, [resolvedSrc])
 
   useEffect(() => {
     setNaturalSize({ width: 0, height: 0 })
@@ -75,9 +76,8 @@ export default function PanelImage({ src, assetId = null, offsetX = 0, offsetY =
     }
   }, [resolvedSrc, updateNaturalSize])
 
-  if (!resolvedSrc) return null
-
   const ready =
+    Boolean(resolvedSrc) &&
     frameSize.width > 0 &&
     frameSize.height > 0 &&
     naturalSize.width > 0 &&
@@ -114,6 +114,20 @@ export default function PanelImage({ src, assetId = null, offsetX = 0, offsetY =
       maxHeight: 'none',
     }
   }
+
+  useEffect(() => {
+    if (!resolvedSrc) return
+    logEvent('PanelImage:render', {
+      ready,
+      resolvedSrcTail: resolvedSrc.slice(-24),
+      propsIn: { offsetX, offsetY, scale },
+      frameSize,
+      naturalSize,
+      appliedStyle: ready ? { left: imageStyle.left, top: imageStyle.top, width: imageStyle.width, height: imageStyle.height } : null,
+    })
+  }, [resolvedSrc, ready, offsetX, offsetY, scale, frameSize.width, frameSize.height, naturalSize.width, naturalSize.height])
+
+  if (!resolvedSrc) return null
 
   return (
     <div ref={frameRef} style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>

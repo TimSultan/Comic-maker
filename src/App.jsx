@@ -5,6 +5,7 @@ import ComicCanvas from './components/Canvas/ComicCanvas'
 import PropertiesPanel from './components/RightSidebar/PropertiesPanel'
 import PanelEditModal from './components/PanelModal/PanelEditModal'
 import AIFillModal from './components/AIFill/AIFillModal'
+import DebugPanel from './components/DebugPanel'
 import useComicStore from './store/useComicStore'
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
       </div>
       <PanelEditModal />
       <AIFillModal />
+      <DebugPanel />
     </div>
   )
 }

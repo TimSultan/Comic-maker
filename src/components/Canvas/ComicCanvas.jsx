@@ -3,6 +3,8 @@ import useComicStore from '../../store/useComicStore'
 import { BubbleShape } from '../PanelModal/BubbleShapes'
 import { getPanelLayout, getPanelPlacement } from '../../utils/defaults'
 import PanelImage from '../PanelImage'
+import { clampPanelImageOffset, MIN_PANEL_IMAGE_SCALE, MAX_PANEL_IMAGE_SCALE } from '../../utils/panelImageTransform'
+import { logEvent, describeTarget } from '../../utils/debugLog'
 
 // ─── Draggable bubble on the main canvas ─────────────────────────
 // Drag → reposition.  Click (no drag) → open modal for that bubble.
@@ -102,6 +104,7 @@ function getPlacementStyle(placement) {
 // ─── Panel / row resize handle ───────────────────────────────────
 
 function PanelImageInteractionLayer({ panel, panelRef, onSelect }) {
+  const layerRef = useRef(null)
   const dragRef = useRef(null)
   const wheelSnapshotRef = useRef(null)
   const wheelTimerRef = useRef(null)
@@ -125,21 +128,64 @@ function PanelImageInteractionLayer({ panel, panelRef, onSelect }) {
     }
   }, [commitWheelZoom])
 
-  const handleWheel = (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    onSelect(panel.id)
+  // React attaches its onWheel prop as a passive listener, so e.preventDefault()
+  // there silently fails and the outer canvas scrolls while the image zooms.
+  // Attach a native, non-passive listener instead so zoom doesn't leak into scroll.
+  useEffect(() => {
+    const el = layerRef.current
+    logEvent('canvas:layer-effect-mount', {
+      panelId: panel.id,
+      layerFound: Boolean(el),
+      computedPointerEvents: el ? getComputedStyle(el).pointerEvents : null,
+      computedZIndex: el ? getComputedStyle(el).zIndex : null,
+    })
+    if (!el) return undefined
 
-    if (!wheelSnapshotRef.current) wheelSnapshotRef.current = getHistorySnapshot()
-    const currentScale = Number.isFinite(panel.imageScale) ? panel.imageScale : 1
-    const nextScale = Math.max(0.25, Math.min(4, currentScale * (e.deltaY < 0 ? 1.08 : 0.92)))
+    const handleWheel = (e) => {
+      logEvent('canvas:wheel-handler-fired', { panelId: panel.id, deltaY: e.deltaY, target: describeTarget(e.target) })
+      e.preventDefault()
+      e.stopPropagation()
+      onSelect(panel.id)
 
-    updatePanelLive(panel.id, { imageScale: Number(nextScale.toFixed(3)) })
-    if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
-    wheelTimerRef.current = setTimeout(commitWheelZoom, 350)
-  }
+      if (!wheelSnapshotRef.current) wheelSnapshotRef.current = getHistorySnapshot()
+      const currentScale = Number.isFinite(panel.imageScale) ? panel.imageScale : 1
+      const nextScale = Math.max(MIN_PANEL_IMAGE_SCALE, Math.min(MAX_PANEL_IMAGE_SCALE, currentScale * (e.deltaY < 0 ? 1.08 : 0.92)))
 
-  const handlePointerDown = (e) => {
+      const rect = panelRef.current?.getBoundingClientRect()
+      const imgEl = panelRef.current?.querySelector('img')
+      const clamped = clampPanelImageOffset({
+        frameWidth: rect?.width,
+        frameHeight: rect?.height,
+        naturalWidth: imgEl?.naturalWidth,
+        naturalHeight: imgEl?.naturalHeight,
+        scale: nextScale,
+        offsetX: panel.imageOffsetX ?? 0,
+        offsetY: panel.imageOffsetY ?? 0,
+      })
+
+      logEvent('canvas:wheel-computed', {
+        panelId: panel.id, currentScale, nextScale, clamped,
+        imgFound: Boolean(imgEl), natural: imgEl ? { w: imgEl.naturalWidth, h: imgEl.naturalHeight } : null,
+        frame: rect ? { w: rect.width, h: rect.height } : null,
+      })
+
+      updatePanelLive(panel.id, {
+        imageScale: Number(nextScale.toFixed(3)),
+        imageOffsetX: clamped.offsetX,
+        imageOffsetY: clamped.offsetY,
+      })
+      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
+      wheelTimerRef.current = setTimeout(commitWheelZoom, 350)
+    }
+
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [commitWheelZoom, getHistorySnapshot, onSelect, panel.id, panel.imageScale, panel.imageOffsetX, panel.imageOffsetY, updatePanelLive])
+
+  // Mouse events, not Pointer Events — matches CanvasBubble/ResizeHandle below,
+  // which are the proven-working drag pattern elsewhere in this file.
+  const handleMouseDown = (e) => {
+    logEvent('canvas:layer-mousedown-fired', { panelId: panel.id, button: e.button, x: e.clientX, y: e.clientY, target: describeTarget(e.target) })
     if (e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
@@ -147,7 +193,15 @@ function PanelImageInteractionLayer({ panel, panelRef, onSelect }) {
     onSelect(panel.id)
 
     const rect = panelRef.current?.getBoundingClientRect()
-    if (!rect) return
+    if (!rect) {
+      logEvent('canvas:layer-mousedown-abort-no-rect', { panelId: panel.id })
+      return
+    }
+    const imgEl = panelRef.current?.querySelector('img')
+    logEvent('canvas:layer-mousedown-start', {
+      panelId: panel.id, rect: { w: rect.width, h: rect.height },
+      imgFound: Boolean(imgEl), natural: imgEl ? { w: imgEl.naturalWidth, h: imgEl.naturalHeight } : null,
+    })
 
     dragRef.current = {
       startX: e.clientX,
@@ -156,46 +210,140 @@ function PanelImageInteractionLayer({ panel, panelRef, onSelect }) {
       startOffsetY: panel.imageOffsetY ?? 0,
       width: rect.width,
       height: rect.height,
+      naturalWidth: imgEl?.naturalWidth,
+      naturalHeight: imgEl?.naturalHeight,
+      scale: Number.isFinite(panel.imageScale) ? panel.imageScale : 1,
       moved: false,
       historySnapshot: getHistorySnapshot(),
     }
 
-    const onPointerMove = (ev) => {
+    const onMouseMove = (ev) => {
       if (!dragRef.current) return
-      ev.preventDefault()
       const dx = ev.clientX - dragRef.current.startX
       const dy = ev.clientY - dragRef.current.startY
+      const wasMoved = dragRef.current.moved
       if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragRef.current.moved = true
+      if (!wasMoved && dragRef.current.moved) {
+        logEvent('canvas:layer-drag-threshold-crossed', { panelId: panel.id, dx, dy })
+      }
       if (!dragRef.current.moved) return
+      const clamped = clampPanelImageOffset({
+        frameWidth: dragRef.current.width,
+        frameHeight: dragRef.current.height,
+        naturalWidth: dragRef.current.naturalWidth,
+        naturalHeight: dragRef.current.naturalHeight,
+        scale: dragRef.current.scale,
+        offsetX: dragRef.current.startOffsetX + (dx / dragRef.current.width) * 100,
+        offsetY: dragRef.current.startOffsetY + (dy / dragRef.current.height) * 100,
+      })
       updatePanelLive(panel.id, {
-        imageOffsetX: dragRef.current.startOffsetX + (dx / dragRef.current.width) * 100,
-        imageOffsetY: dragRef.current.startOffsetY + (dy / dragRef.current.height) * 100,
+        imageOffsetX: clamped.offsetX,
+        imageOffsetY: clamped.offsetY,
       })
     }
 
-    const onPointerUp = () => {
+    const onMouseUp = () => {
       const drag = dragRef.current
+      logEvent('canvas:layer-mouseup', { panelId: panel.id, moved: drag?.moved ?? false })
       if (drag?.moved) commitHistorySnapshot(drag.historySnapshot)
       dragRef.current = null
-      document.removeEventListener('pointermove', onPointerMove)
-      document.removeEventListener('pointerup', onPointerUp)
-      document.removeEventListener('pointercancel', onPointerUp)
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
     }
 
-    document.addEventListener('pointermove', onPointerMove)
-    document.addEventListener('pointerup', onPointerUp)
-    document.addEventListener('pointercancel', onPointerUp)
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }
+
+  return (
+    <div
+      ref={layerRef}
+      data-no-export
+      className="absolute inset-0"
+      style={{ zIndex: 1, cursor: 'grab' }}
+      title="Drag to reframe - Scroll to zoom"
+      onMouseDown={handleMouseDown}
+    />
+  )
+}
+
+// ─── Visible zoom controls (discoverable alternative to scroll-to-zoom) ──
+
+function PanelZoomControls({ panel, panelRef, onSelect }) {
+  const updatePanel = useComicStore(s => s.updatePanel)
+
+  const applyZoom = (factor) => {
+    logEvent('canvas:zoom-button-click', { panelId: panel.id, factor })
+    onSelect(panel.id)
+    const rect = panelRef.current?.getBoundingClientRect()
+    const imgEl = panelRef.current?.querySelector('img')
+    const currentScale = Number.isFinite(panel.imageScale) ? panel.imageScale : 1
+    const nextScale = Math.max(MIN_PANEL_IMAGE_SCALE, Math.min(MAX_PANEL_IMAGE_SCALE, currentScale * factor))
+    const clamped = clampPanelImageOffset({
+      frameWidth: rect?.width,
+      frameHeight: rect?.height,
+      naturalWidth: imgEl?.naturalWidth,
+      naturalHeight: imgEl?.naturalHeight,
+      scale: nextScale,
+      offsetX: panel.imageOffsetX ?? 0,
+      offsetY: panel.imageOffsetY ?? 0,
+    })
+    logEvent('canvas:zoom-computed', {
+      panelId: panel.id, currentScale, nextScale, clamped,
+      rectFound: Boolean(rect), imgFound: Boolean(imgEl),
+      rect: rect ? { w: rect.width, h: rect.height } : null,
+      natural: imgEl ? { w: imgEl.naturalWidth, h: imgEl.naturalHeight } : null,
+    })
+    updatePanel(panel.id, {
+      imageScale: Number(nextScale.toFixed(3)),
+      imageOffsetX: clamped.offsetX,
+      imageOffsetY: clamped.offsetY,
+    })
+    const after = useComicStore.getState().pages.flatMap(p => p.panels).find(p => p.id === panel.id)
+    logEvent('canvas:zoom-readback', {
+      panelId: panel.id,
+      storedScale: after?.imageScale, storedOffsetX: after?.imageOffsetX, storedOffsetY: after?.imageOffsetY,
+    })
+  }
+
+  const resetView = () => {
+    logEvent('canvas:reset-button-click', { panelId: panel.id })
+    onSelect(panel.id)
+    updatePanel(panel.id, { imageScale: 1, imageOffsetX: 0, imageOffsetY: 0 })
   }
 
   return (
     <div
       data-no-export
-      className="absolute inset-0"
-      style={{ zIndex: 1, cursor: 'grab', touchAction: 'none' }}
-      title="Drag to reframe - Scroll to zoom"
-      onPointerDown={handlePointerDown}
-      onWheel={handleWheel}
-    />
+      className="absolute bottom-1.5 right-1.5 flex items-center gap-0.5 rounded-md bg-black/60 px-1 py-1"
+      style={{ zIndex: 4 }}
+      onMouseDown={e => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        title="Zoom out"
+        className="w-5 h-5 flex items-center justify-center text-white text-xs leading-none rounded hover:bg-white/20"
+        onClick={() => applyZoom(1 / 1.2)}
+      >
+        −
+      </button>
+      <button
+        type="button"
+        title="Reset pan & zoom"
+        className="w-5 h-5 flex items-center justify-center text-white text-xs leading-none rounded hover:bg-white/20"
+        onClick={resetView}
+      >
+        ⟲
+      </button>
+      <button
+        type="button"
+        title="Zoom in"
+        className="w-5 h-5 flex items-center justify-center text-white text-xs leading-none rounded hover:bg-white/20"
+        onClick={() => applyZoom(1.2)}
+      >
+        +
+      </button>
+    </div>
   )
 }
 
@@ -265,6 +413,14 @@ function ComicPanel({ panel, idx, placement, isSelected, onSelect, onBubbleClick
   const panelRef = useRef(null)
   const hasImage = Boolean(panel.imageUrl || panel.imageAssetId)
 
+  useEffect(() => {
+    logEvent('canvas:panel-mount', {
+      panelId: panel.id, idx, hasImage,
+      hasImageUrl: Boolean(panel.imageUrl), hasImageAssetId: Boolean(panel.imageAssetId),
+      bubbleCount: panel.bubbles?.length ?? 0,
+    })
+  }, [panel.id, hasImage])
+
   return (
     <div
       ref={panelRef}
@@ -293,6 +449,14 @@ function ComicPanel({ panel, idx, placement, isSelected, onSelect, onBubbleClick
 
       {hasImage && (
         <PanelImageInteractionLayer
+          panel={panel}
+          panelRef={panelRef}
+          onSelect={onSelect}
+        />
+      )}
+
+      {hasImage && (
+        <PanelZoomControls
           panel={panel}
           panelRef={panelRef}
           onSelect={onSelect}
@@ -439,7 +603,7 @@ export default function ComicCanvas() {
           <p className="text-xs text-gray-600 select-none">
             Hover between panels to resize · Drag image to reframe
             <br />
-            Scroll to zoom
+            Scroll or use the +/− buttons to zoom
           </p>
         )}
       </div>

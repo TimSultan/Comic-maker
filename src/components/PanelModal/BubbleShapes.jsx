@@ -1,4 +1,31 @@
-import React from 'react'
+import React, { useLayoutEffect, useRef, useState } from 'react'
+
+// Text never shrinks past this, no matter how small the bubble or how long
+// the text — matches the floor of the manual "Font" size slider.
+const AUTO_FIT_MIN_FONT_SIZE = 8
+
+// Shrinks font size (from the bubble's preferred/typed size) until the text
+// no longer overflows its box, so authors don't have to hand-tune font size
+// every time a bubble is a bit small for its text. `layoutKey` bundles every
+// input that can change how the text wraps — changing it re-attempts the
+// preferred size first (e.g. after widening the bubble) before shrinking again.
+function useAutoFitFontSize(textRef, preferredSize, layoutKey) {
+  const [size, setSize] = useState(preferredSize)
+
+  useLayoutEffect(() => {
+    setSize(preferredSize)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preferredSize, layoutKey])
+
+  useLayoutEffect(() => {
+    const el = textRef.current
+    if (!el || size <= AUTO_FIT_MIN_FONT_SIZE) return
+    const overflowing = el.scrollHeight > el.clientHeight + 0.5 || el.scrollWidth > el.clientWidth + 0.5
+    if (overflowing) setSize(prev => Math.max(AUTO_FIT_MIN_FONT_SIZE, prev - 1))
+  })
+
+  return size
+}
 
 const PRESET_DEFAULTS = {
   'classic-comic': {
@@ -407,7 +434,7 @@ function minHeight(shape) {
   return 54
 }
 
-function textStyle(bubble) {
+function textStyle(bubble, fontSizeOverride) {
   const { typography, appearance, shape } = bubble
   const textColor = shape === 'sfx' ? appearance.fill : '#111111'
   const explicitHeight = bubble.height != null
@@ -423,7 +450,7 @@ function textStyle(bubble) {
     textAlign: typography.align || 'center',
     color: textColor,
     fontFamily: '"Trebuchet MS", "Comic Sans MS", "Arial Black", sans-serif',
-    fontSize: typography.fontSize,
+    fontSize: fontSizeOverride ?? typography.fontSize,
     fontWeight: typography.weight,
     fontStyle: typography.italic ? 'italic' : 'normal',
     lineHeight: shape === 'sfx' ? 0.95 : 1.12,
@@ -440,6 +467,14 @@ export function BubbleShape({ bubble, type, text }) {
   const normalized = mergePreset(bubble || { type, text })
   const value = normalized.text || text || ''
   const explicitHeight = normalized.height != null
+  const { typography } = normalized
+
+  const textRef = useRef(null)
+  const layoutKey = [
+    value, normalized.width, normalized.height, normalized.shape,
+    typography.weight, typography.uppercase, typography.italic, typography.align,
+  ].join('|')
+  const fitFontSize = useAutoFitFontSize(textRef, typography.fontSize, layoutKey)
 
   return (
     <div
@@ -451,7 +486,7 @@ export function BubbleShape({ bubble, type, text }) {
       }}
     >
       <BalloonSvg bubble={normalized} />
-      <div style={textStyle(normalized)}>
+      <div ref={textRef} style={textStyle(normalized, fitFontSize)}>
         {value ? value : <Empty />}
       </div>
     </div>

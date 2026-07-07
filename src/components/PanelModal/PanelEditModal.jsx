@@ -3,12 +3,20 @@ import useComicStore from '../../store/useComicStore'
 import { BUBBLE_STYLE_PRESETS, PERSPECTIVES, getGridDims, getPanelPlacement, uid } from '../../utils/defaults'
 import { BubbleShape, getBubblePresetDefaults, getBubbleTailBasePoint } from './BubbleShapes'
 import PanelImage from '../PanelImage'
+import { clampPanelImageOffset, MIN_PANEL_IMAGE_SCALE, MAX_PANEL_IMAGE_SCALE } from '../../utils/panelImageTransform'
+import { logEvent, describeTarget } from '../../utils/debugLog'
 
 const PAGE_INNER_W = 600
 const PAGE_INNER_H = 857
 const PANEL_GAP = 6
 const STYLE_DEFAULTS_KEY = 'comic-bubble-style-defaults'
 const DEFAULT_STYLE_KEY = 'comic-default-bubble-style'
+
+const QUICK_BUBBLE_COLORS = [
+  '#ffffff', '#111111', '#f8fafc', '#fde047',
+  '#fca5a5', '#fbcfe8', '#e9d5ff', '#bae6fd',
+  '#bbf7d0', '#fdba74',
+]
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value))
@@ -111,7 +119,7 @@ function getTailBaseHandle(bubble = {}) {
   }
 }
 
-function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, onResize }) {
+function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, onResize, onDelete }) {
   const getHistorySnapshot = useComicStore(s => s.getHistorySnapshot)
   const commitHistorySnapshot = useComicStore(s => s.commitHistorySnapshot)
 
@@ -315,6 +323,22 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
           onMouseDown={handleResizeMouseDown}
         />
       )}
+      {isSelected && (
+        <button
+          type="button"
+          className="absolute w-5 h-5 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-500 border-2 border-white shadow text-white text-xs leading-none transition-colors"
+          style={{
+            right: -9,
+            top: -9,
+            zIndex: 21,
+          }}
+          title="Delete bubble"
+          onMouseDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); onDelete(bubble.id) }}
+        >
+          ×
+        </button>
+      )}
     </div>
   )
 }
@@ -346,32 +370,65 @@ function PanelImageInteractionLayer({ panel, canvasRef, onClickPoint }) {
 
   useEffect(() => {
     const wheelTarget = canvasRef.current
+    logEvent('modal:layer-effect-mount', {
+      panelId: panel.id,
+      canvasFound: Boolean(wheelTarget),
+    })
     if (!wheelTarget) return undefined
 
     const handleWheel = (e) => {
       if (e.target?.closest?.('input, textarea, select, button')) return
+      logEvent('modal:wheel-handler-fired', { panelId: panel.id, deltaY: e.deltaY, target: describeTarget(e.target) })
       e.preventDefault()
       e.stopPropagation()
       if (!wheelSnapshotRef.current) wheelSnapshotRef.current = getHistorySnapshot()
       const currentScale = Number.isFinite(panel.imageScale) ? panel.imageScale : 1
-      const nextScale = Math.max(0.25, Math.min(4, currentScale * (e.deltaY < 0 ? 1.08 : 0.92)))
-      updatePanelLive(panel.id, { imageScale: Number(nextScale.toFixed(3)) })
+      const nextScale = Math.max(MIN_PANEL_IMAGE_SCALE, Math.min(MAX_PANEL_IMAGE_SCALE, currentScale * (e.deltaY < 0 ? 1.08 : 0.92)))
+
+      const rect = canvasRef.current?.getBoundingClientRect()
+      const imgEl = canvasRef.current?.querySelector('img')
+      const clamped = clampPanelImageOffset({
+        frameWidth: rect?.width,
+        frameHeight: rect?.height,
+        naturalWidth: imgEl?.naturalWidth,
+        naturalHeight: imgEl?.naturalHeight,
+        scale: nextScale,
+        offsetX: panel.imageOffsetX ?? 0,
+        offsetY: panel.imageOffsetY ?? 0,
+      })
+
+      updatePanelLive(panel.id, {
+        imageScale: Number(nextScale.toFixed(3)),
+        imageOffsetX: clamped.offsetX,
+        imageOffsetY: clamped.offsetY,
+      })
       if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
       wheelTimerRef.current = setTimeout(commitWheelZoom, 350)
     }
 
     wheelTarget.addEventListener('wheel', handleWheel, { passive: false, capture: true })
     return () => wheelTarget.removeEventListener('wheel', handleWheel, true)
-  }, [canvasRef, commitWheelZoom, getHistorySnapshot, panel.id, panel.imageScale, updatePanelLive])
+  }, [canvasRef, commitWheelZoom, getHistorySnapshot, panel.id, panel.imageScale, panel.imageOffsetX, panel.imageOffsetY, updatePanelLive])
 
-  const handlePointerDown = (e) => {
+  // Mouse events, not Pointer Events — matches DraggableBubble below,
+  // which is the proven-working drag pattern elsewhere in this file.
+  const handleMouseDown = (e) => {
+    logEvent('modal:layer-mousedown-fired', { panelId: panel.id, button: e.button, x: e.clientX, y: e.clientY, target: describeTarget(e.target) })
     if (e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
     commitWheelZoom()
 
     const rect = canvasRef.current?.getBoundingClientRect()
-    if (!rect) return
+    if (!rect) {
+      logEvent('modal:layer-mousedown-abort-no-rect', { panelId: panel.id })
+      return
+    }
+    const imgEl = canvasRef.current?.querySelector('img')
+    logEvent('modal:layer-mousedown-start', {
+      panelId: panel.id, rect: { w: rect.width, h: rect.height },
+      imgFound: Boolean(imgEl), natural: imgEl ? { w: imgEl.naturalWidth, h: imgEl.naturalHeight } : null,
+    })
 
     dragRef.current = {
       startX: e.clientX,
@@ -380,46 +437,126 @@ function PanelImageInteractionLayer({ panel, canvasRef, onClickPoint }) {
       startOffsetY: panel.imageOffsetY ?? 0,
       width: rect.width,
       height: rect.height,
+      naturalWidth: imgEl?.naturalWidth,
+      naturalHeight: imgEl?.naturalHeight,
+      scale: Number.isFinite(panel.imageScale) ? panel.imageScale : 1,
       moved: false,
       historySnapshot: getHistorySnapshot(),
     }
 
-    const onPointerMove = (ev) => {
+    const onMouseMove = (ev) => {
       if (!dragRef.current) return
-      ev.preventDefault()
       const dx = ev.clientX - dragRef.current.startX
       const dy = ev.clientY - dragRef.current.startY
+      const wasMoved = dragRef.current.moved
       if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragRef.current.moved = true
+      if (!wasMoved && dragRef.current.moved) {
+        logEvent('modal:layer-drag-threshold-crossed', { panelId: panel.id, dx, dy })
+      }
       if (!dragRef.current.moved) return
+      const clamped = clampPanelImageOffset({
+        frameWidth: dragRef.current.width,
+        frameHeight: dragRef.current.height,
+        naturalWidth: dragRef.current.naturalWidth,
+        naturalHeight: dragRef.current.naturalHeight,
+        scale: dragRef.current.scale,
+        offsetX: dragRef.current.startOffsetX + (dx / dragRef.current.width) * 100,
+        offsetY: dragRef.current.startOffsetY + (dy / dragRef.current.height) * 100,
+      })
       updatePanelLive(panel.id, {
-        imageOffsetX: dragRef.current.startOffsetX + (dx / dragRef.current.width) * 100,
-        imageOffsetY: dragRef.current.startOffsetY + (dy / dragRef.current.height) * 100,
+        imageOffsetX: clamped.offsetX,
+        imageOffsetY: clamped.offsetY,
       })
     }
 
-    const onPointerUp = (ev) => {
+    const onMouseUp = (ev) => {
       const drag = dragRef.current
+      logEvent('modal:layer-mouseup', { panelId: panel.id, moved: drag?.moved ?? false })
       if (drag?.moved) commitHistorySnapshot(drag.historySnapshot)
       else onClickPoint(ev.clientX, ev.clientY)
       dragRef.current = null
-      document.removeEventListener('pointermove', onPointerMove)
-      document.removeEventListener('pointerup', onPointerUp)
-      document.removeEventListener('pointercancel', onPointerUp)
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
     }
 
-    document.addEventListener('pointermove', onPointerMove)
-    document.addEventListener('pointerup', onPointerUp)
-    document.addEventListener('pointercancel', onPointerUp)
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
   }
 
   return (
     <div
       ref={layerRef}
       className="absolute inset-0"
-      style={{ zIndex: 1, cursor: 'grab', touchAction: 'none' }}
+      style={{ zIndex: 1, cursor: 'grab' }}
       title="Drag to reframe - Wheel to zoom - Click to place bubble"
-      onPointerDown={handlePointerDown}
+      onMouseDown={handleMouseDown}
     />
+  )
+}
+
+// ─── Visible zoom controls (discoverable alternative to scroll-to-zoom) ──
+
+function PanelImageZoomControls({ panel, canvasRef }) {
+  const updatePanel = useComicStore(s => s.updatePanel)
+
+  const applyZoom = (factor) => {
+    logEvent('modal:zoom-button-click', { panelId: panel.id, factor })
+    const rect = canvasRef.current?.getBoundingClientRect()
+    const imgEl = canvasRef.current?.querySelector('img')
+    const currentScale = Number.isFinite(panel.imageScale) ? panel.imageScale : 1
+    const nextScale = Math.max(MIN_PANEL_IMAGE_SCALE, Math.min(MAX_PANEL_IMAGE_SCALE, currentScale * factor))
+    const clamped = clampPanelImageOffset({
+      frameWidth: rect?.width,
+      frameHeight: rect?.height,
+      naturalWidth: imgEl?.naturalWidth,
+      naturalHeight: imgEl?.naturalHeight,
+      scale: nextScale,
+      offsetX: panel.imageOffsetX ?? 0,
+      offsetY: panel.imageOffsetY ?? 0,
+    })
+    updatePanel(panel.id, {
+      imageScale: Number(nextScale.toFixed(3)),
+      imageOffsetX: clamped.offsetX,
+      imageOffsetY: clamped.offsetY,
+    })
+  }
+
+  const resetView = () => {
+    logEvent('modal:reset-button-click', { panelId: panel.id })
+    updatePanel(panel.id, { imageScale: 1, imageOffsetX: 0, imageOffsetY: 0 })
+  }
+
+  return (
+    <div
+      className="absolute bottom-1.5 right-1.5 flex items-center gap-0.5 rounded-md bg-black/60 px-1 py-1"
+      style={{ zIndex: 6 }}
+      onMouseDown={e => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        title="Zoom out"
+        className="w-5 h-5 flex items-center justify-center text-white text-xs leading-none rounded hover:bg-white/20"
+        onClick={() => applyZoom(1 / 1.2)}
+      >
+        −
+      </button>
+      <button
+        type="button"
+        title="Reset pan & zoom"
+        className="w-5 h-5 flex items-center justify-center text-white text-xs leading-none rounded hover:bg-white/20"
+        onClick={resetView}
+      >
+        ⟲
+      </button>
+      <button
+        type="button"
+        title="Zoom in"
+        className="w-5 h-5 flex items-center justify-center text-white text-xs leading-none rounded hover:bg-white/20"
+        onClick={() => applyZoom(1.2)}
+      >
+        +
+      </button>
+    </div>
   )
 }
 
@@ -775,6 +912,7 @@ export default function PanelEditModal() {
   const [styleClipboard, setStyleClipboard] = useState(null)
   const [styleDefaults, setStyleDefaults] = useState(loadStyleDefaults)
   const [defaultBubbleStyle, setDefaultBubbleStyle] = useState(loadDefaultStyle)
+  const [quickAddFill, setQuickAddFill] = useState(QUICK_BUBBLE_COLORS[0])
   const canvasRef = useRef(null)
 
   useEffect(() => {
@@ -937,6 +1075,27 @@ export default function PanelEditModal() {
     if (selectedBubbleId === bubbleId) setSelectedBubbleId(null)
   }
 
+  const handleQuickAddShape = (styleValue) => {
+    const id = uid()
+    const base = makeBubbleStyle(styleValue)
+    addBubble(panel.id, {
+      id,
+      x: 20,
+      y: 12,
+      ...base,
+      appearance: { ...base.appearance, fill: quickAddFill },
+    })
+    setDefaultBubbleStyle(styleValue)
+    selectBubble(id)
+  }
+
+  const handleQuickColor = (color) => {
+    setQuickAddFill(color)
+    if (selectedBubble) {
+      handleBubbleUpdate(selectedBubble, patchNested(selectedBubble, 'appearance', { fill: color }))
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
@@ -1002,6 +1161,10 @@ export default function PanelEditModal() {
                 />
               )}
 
+              {hasPanelImage && (
+                <PanelImageZoomControls panel={panel} canvasRef={canvasRef} />
+              )}
+
               {!hasPanelImage && (
                 panel.prompt ? (
                   <p
@@ -1028,6 +1191,7 @@ export default function PanelEditModal() {
                     onMove={(bubbleId, pos) => updateBubbleLive(panel.id, bubbleId, pos)}
                     onTailUpdate={(bubbleId, updates) => handleBubbleLiveUpdate(bubble, updates)}
                     onResize={(bubbleId, updates) => handleBubbleLiveUpdate(bubble, updates)}
+                    onDelete={handleRemoveBubble}
                   />
                 ))}
               </div>
@@ -1078,6 +1242,48 @@ export default function PanelEditModal() {
                 >
                   + Add
                 </button>
+              </div>
+
+              <div className="rounded-md border border-gray-800 bg-gray-950/40 p-2 space-y-2">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Quick Add</span>
+
+                <div className="grid grid-cols-5 gap-1.5">
+                  {QUICK_BUBBLE_COLORS.map(color => (
+                    <button
+                      key={color}
+                      type="button"
+                      className={`aspect-square rounded-full border-2 transition-transform ${
+                        quickAddFill === color ? 'border-purple-400 scale-110' : 'border-gray-700 hover:border-gray-500'
+                      }`}
+                      style={{ background: color }}
+                      title={selectedBubble ? `Set bubble color` : `Use this color for the next bubble`}
+                      onClick={() => handleQuickColor(color)}
+                    />
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5">
+                  {BUBBLE_STYLE_PRESETS.map(preset => (
+                    <button
+                      key={preset.value}
+                      type="button"
+                      className="flex flex-col items-center gap-1 rounded border border-gray-700 bg-gray-900 hover:border-purple-500 transition-colors p-1"
+                      title={`Add ${preset.label} bubble`}
+                      onClick={() => handleQuickAddShape(preset.value)}
+                    >
+                      <div style={{ width: 44, height: 32 }}>
+                        <BubbleShape bubble={{
+                          style: preset.value,
+                          text: 'Aa',
+                          appearance: { fill: quickAddFill },
+                          tail: { enabled: false },
+                          height: 40,
+                        }} />
+                      </div>
+                      <span className="text-[10px] text-gray-500 leading-none text-center">{preset.label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {selectedBubble && (
