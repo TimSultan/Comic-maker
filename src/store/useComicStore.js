@@ -130,6 +130,15 @@ const useComicStore = create((set, get) => {
   imageModel: 'gemini-3.1-flash-image',
   imageQuality: 'medium',
   geminiApiKey: '',
+  // On by default; remembers the user's choice once they've touched it.
+  autoSaveImages: (() => {
+    try {
+      const saved = localStorage.getItem('comic-auto-save-images')
+      return saved === null ? true : saved === 'true'
+    } catch {
+      return true
+    }
+  })(),
 
   // ── Global style (applies to all panels unless overridden) ─────
   globalStyle: {
@@ -460,6 +469,10 @@ const useComicStore = create((set, get) => {
   setImageModel: (v) => trackedSet({ imageModel: v }),
   setImageQuality: (v) => trackedSet({ imageQuality: v }),
   setGeminiApiKey: (v) => trackedSet({ geminiApiKey: v }),
+  setAutoSaveImages: (v) => {
+    try { localStorage.setItem('comic-auto-save-images', String(v)) } catch { /* ignore */ }
+    trackedSet({ autoSaveImages: v })
+  },
   })
 })
 

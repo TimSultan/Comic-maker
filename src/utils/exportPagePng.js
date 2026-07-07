@@ -35,7 +35,7 @@ function canvasBlob(canvas) {
   })
 }
 
-export async function exportPageAsPng(pageElement, fileName) {
+export async function exportPageAsPng(pageElement, fileName, { hideBubbles = false } = {}) {
   if (!pageElement) throw new Error('No rendered page found to export.')
   await Promise.all([...pageElement.querySelectorAll('img')].map(waitForImage))
 
@@ -80,6 +80,10 @@ export async function exportPageAsPng(pageElement, fileName) {
         panel.style.border = '2px solid #111827'
         panel.style.boxShadow = 'none'
       })
+
+      if (hideBubbles) {
+        documentClone.querySelectorAll('[data-bubble-layer]').forEach(layer => layer.remove())
+      }
 
       // Apply explicit cover-correct dimensions so html2canvas doesn't stretch images.
       const clonedPage = documentClone.querySelector('[data-comic-page]')

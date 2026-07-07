@@ -15,6 +15,7 @@ const FILE_MENU = [
   { label: 'Load from JSON File…', action: 'load-json' },
   { separator: true },
   { label: 'Export PNG', action: 'export-png' },
+  { label: 'Export PNG (No Text)', action: 'export-png-no-text' },
   { label: 'Export PDF', action: 'export-pdf', disabled: true, hint: '(Phase 6)' },
 ]
 
@@ -96,6 +97,8 @@ export default function TopBar() {
   const openCharactersPanel = useComicStore(s => s.openCharactersPanel)
   const openAssetsPanel = useComicStore(s => s.openAssetsPanel)
   const openAIFillModal = useComicStore(s => s.openAIFillModal)
+  const autoSaveImages = useComicStore(s => s.autoSaveImages)
+  const setAutoSaveImages = useComicStore(s => s.setAutoSaveImages)
   const canUndo = useComicStore(s => s.undoStack.length > 0)
   const canRedo = useComicStore(s => s.redoStack.length > 0)
 
@@ -287,6 +290,17 @@ export default function TopBar() {
         }
         break
       }
+      case 'export-png-no-text': {
+        try {
+          const pageEl = document.querySelector('[data-comic-page]')
+          const state = useComicStore.getState()
+          const page = state.pages.find(p => p.id === state.selectedPageId) ?? state.pages[0]
+          await exportPageAsPng(pageEl, `${state.comicTitle || 'comic'}-${page?.title || 'page'}-no-text`, { hideBubbles: true })
+        } catch (err) {
+          alert('Failed to export PNG: ' + err.message)
+        }
+        break
+      }
       default:
         break
     }
@@ -400,6 +414,20 @@ export default function TopBar() {
         onClick={openAssetsPanel}
       >
         Assets
+      </button>
+
+      <button
+        className={`flex items-center gap-1.5 px-3 h-8 text-sm rounded transition-colors ${
+          autoSaveImages
+            ? 'bg-green-900/50 text-green-300 hover:bg-green-900/70'
+            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+        }`}
+        onClick={() => setAutoSaveImages(!autoSaveImages)}
+        title={autoSaveImages
+          ? 'Every generated image (panels + character portraits) is downloaded automatically. Click to turn off.'
+          : 'Generated images are not downloaded automatically. Click to turn on.'}
+      >
+        💾 Auto-Save {autoSaveImages ? 'On' : 'Off'}
       </button>
 
       {/* Spacer */}

@@ -12,6 +12,7 @@ import {
 } from '../../utils/defaults'
 import { generatePanelImage } from '../../utils/imageGen'
 import { deleteImageAsset, putImageAsset, resolveImageUrl } from '../../utils/imageStore'
+import { downloadDataUrlImage } from '../../utils/downloadImage'
 
 // ─── Compute the best API size/ratio for the current panel ───────
 // Page canvas: 620×877px total, 10px padding each side, 6px gap between cells
@@ -435,6 +436,12 @@ function PanelTab() {
       imageResolution: targetResolution,
       geminiInteractionId: interactionId,
     })
+
+    if (useComicStore.getState().autoSaveImages) {
+      const idx = targetPage.panels.findIndex(p => p.id === targetPanel.id)
+      const slug = (targetPage.title || 'page').replace(/\s+/g, '-').toLowerCase()
+      downloadDataUrlImage(imageUrl, `${slug}-panel-${idx + 1}-${Date.now()}.png`)
+    }
   }
 
   const handleGenerateImage = async () => {
@@ -1017,6 +1024,10 @@ function CharacterCard({ char, onUpdate, onRemove }) {
         size: '1:1',
       })
       onUpdate({ imageUrl })
+      if (useComicStore.getState().autoSaveImages) {
+        const slug = (char.name || 'character').replace(/\s+/g, '-').toLowerCase()
+        downloadDataUrlImage(imageUrl, `${slug}-portrait-${Date.now()}.png`)
+      }
     } catch (e) {
       setGenError(e.message)
     } finally {

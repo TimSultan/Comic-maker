@@ -1,10 +1,22 @@
-import React, { useCallback, useEffect, useRef } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import useComicStore from '../../store/useComicStore'
 import { BubbleShape } from '../PanelModal/BubbleShapes'
 import { getPanelLayout, getPanelPlacement } from '../../utils/defaults'
 import PanelImage from '../PanelImage'
 import { clampPanelImageOffset, MIN_PANEL_IMAGE_SCALE, MAX_PANEL_IMAGE_SCALE } from '../../utils/panelImageTransform'
 import { logEvent, describeTarget } from '../../utils/debugLog'
+import { putImageAsset } from '../../utils/imageStore'
+
+// ─── Shared: read a dropped/picked file as a data URL ────────────
+
+function readImageFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
 
 // ─── Draggable bubble on the main canvas ─────────────────────────
 // Drag → reposition.  Click (no drag) → open modal for that bubble.
@@ -14,7 +26,7 @@ function CanvasBubble({ bubble, panelRef, onDragUpdate, onOpenModal }) {
   const getHistorySnapshot = useComicStore(s => s.getHistorySnapshot)
   const commitHistorySnapshot = useComicStore(s => s.commitHistorySnapshot)
 
-  const handleMouseDown = (e) => {
+          const handleMouseDown = (e) => {
     e.stopPropagation()
     if (e.button !== 0) return
 
@@ -411,6 +423,9 @@ function ResizeHandle({ direction, position, idx, sizes, pageId, pageRef }) {
 
 function ComicPanel({ panel, idx, placement, isSelected, onSelect, onBubbleClick, onBubbleDrag }) {
   const panelRef = useRef(null)
+  const fileInputRef = useRef(null)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const updatePanel = useComicStore(s => s.updatePanel)
   const hasImage = Boolean(panel.imageUrl || panel.imageAssetId)
 
   useEffect(() => {
@@ -420,6 +435,37 @@ function ComicPanel({ panel, idx, placement, isSelected, onSelect, onBubbleClick
       bubbleCount: panel.bubbles?.length ?? 0,
     })
   }, [panel.id, hasImage])
+
+  const applyImageFile = async (file) => {
+    if (!file || !file.type.startsWith('image/')) return
+    const dataUrl = await readImageFileAsDataUrl(file)
+    const imageAssetId = await putImageAsset({ dataUrl, source: 'panel', label: `${panel.id} uploaded image` })
+    updatePanel(panel.id, {
+      imageUrl: null,
+      imageAssetId,
+      imageOffsetX: 0,
+      imageOffsetY: 0,
+      imageScale: 1,
+      geminiInteractionId: null,
+    })
+  }
+
+  const handleDragOver = (e) => {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    setIsDragOver(true)
+  }
+  const handleDragLeave = (e) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return
+    setIsDragOver(false)
+  }
+  const handleDrop = (e) => {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    setIsDragOver(false)
+    onSelect(panel.id)
+    applyImageFile([...e.dataTransfer.files].find(f => f.type.startsWith('image/')))
+  }
 
   return (
     <div
@@ -436,6 +482,9 @@ function ComicPanel({ panel, idx, placement, isSelected, onSelect, onBubbleClick
         ...getPlacementStyle(placement),
       }}
       onMouseDown={e => { if (e.button === 0) onSelect(panel.id) }}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
       {hasImage && (
         <PanelImage
@@ -496,9 +545,54 @@ function ComicPanel({ panel, idx, placement, isSelected, onSelect, onBubbleClick
         </span>
       )}
 
+      {/* Hidden file input backing the replace/add-image button */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={e => {
+          const file = e.target.files?.[0]
+          applyImageFile(file)
+          e.target.value = ''
+        }}
+      />
+
+      {/* Add/replace image — same target as drag-and-drop */}
+      <button
+        type="button"
+        data-no-export
+        title={hasImage ? 'Replace image' : 'Add image'}
+        className="absolute bottom-1.5 left-1.5 w-6 h-6 flex items-center justify-center rounded-md
+          bg-black/60 text-white text-xs hover:bg-black/80 transition-colors"
+        style={{ zIndex: 4 }}
+        onMouseDown={e => e.stopPropagation()}
+        onClick={e => { e.stopPropagation(); onSelect(panel.id); fileInputRef.current?.click() }}
+      >
+        📁
+      </button>
+
+      {/* Drag-over indicator */}
+      {isDragOver && (
+        <div
+          data-no-export
+          className="absolute inset-0 flex items-center justify-center"
+          style={{
+            zIndex: 6,
+            pointerEvents: 'none',
+            background: 'rgba(139, 92, 246, 0.25)',
+            border: '2px dashed #a78bfa',
+          }}
+        >
+          <span className="text-xs font-semibold px-2 py-1 rounded bg-black/70 text-white">
+            Drop to {hasImage ? 'replace' : 'add'} image
+          </span>
+        </div>
+      )}
+
       {/* Bubble overlays: drag to move, click to open modal */}
       {panel.bubbles?.length > 0 && (
-        <div style={{ position: 'absolute', inset: 0, zIndex: 3, pointerEvents: 'none' }}>
+        <div data-bubble-layer style={{ position: 'absolute', inset: 0, zIndex: 3, pointerEvents: 'none' }}>
           {panel.bubbles.map(bubble => (
             <CanvasBubble
               key={bubble.id}
