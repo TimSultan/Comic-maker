@@ -346,6 +346,9 @@ function PanelTab() {
   const activeImageResolution = imageResolutionOptions.includes(panel?.imageResolution)
     ? panel.imageResolution
     : imageResolutionOptions[0] ?? '1K'
+  const emptyPanelsToGenerate = page?.panels.filter(p =>
+    !(p.imageUrl || p.imageAssetId) && p.prompt?.trim()
+  ) ?? []
   const generateDisabled = genState.loading || (
     isEditingExistingImage
       ? !(panel.prompt?.trim() || panel.editPrompt?.trim())
@@ -362,40 +365,45 @@ function PanelTab() {
     })
   }
 
-  const handleGenerateImage = async () => {
-    const apiKey       = localStorage.getItem('comic-oai-key')    ?? ''
-    const geminiApiKey = localStorage.getItem('comic-gemini-key') ?? ''
-    setGenState({ loading: true, error: '' })
-    try {
-      const isEditingExistingImage = Boolean(panel.imageUrl || panel.imageAssetId)
-      const selectedChars = allCharacters.filter(c => panel.characters?.includes(c.id))
-      const currentPanelImageUrl = await resolveImageUrl(panel.imageUrl, panel.imageAssetId)
-      const currentImageReference = isEditingExistingImage && currentPanelImageUrl
+  const generateImageForPanel = async (targetPanel, targetPage, { apiKey, geminiApiKey, imageSize, imageResolution }) => {
+    const generationPanel = {
+      ...targetPanel,
+      imageSize: imageSize ?? targetPanel.imageSize,
+      imageResolution: imageResolution ?? targetPanel.imageResolution,
+    }
+    const isEditingExistingImage = Boolean(targetPanel.imageUrl || targetPanel.imageAssetId)
+    const selectedChars = allCharacters.filter(c => targetPanel.characters?.includes(c.id))
+    const selectedPanelReferenceImages = assetImages.filter(image => (targetPanel.referenceImageIds ?? []).includes(image.id))
+    const currentPanelImageUrl = await resolveImageUrl(targetPanel.imageUrl, targetPanel.imageAssetId)
+    const currentImageReference = isEditingExistingImage && currentPanelImageUrl
         ? [{
             url: currentPanelImageUrl,
             name: 'Current panel image to edit',
             type: 'current-panel',
           }]
         : []
-      const selectedImageReferences = (await Promise.all(selectedReferenceImages.map(async image => ({
+    const selectedImageReferences = (await Promise.all(selectedPanelReferenceImages.map(async image => ({
         url: await resolveImageUrl(image.url, image.assetId),
         name: `${image.source} reference: ${image.label}`,
         type: 'selected',
       })))).filter(image => image.url)
-      const editInstructions = panel.editPrompt?.trim()
-      const referenceInstructions = [
+    const editInstructions = targetPanel.editPrompt?.trim()
+    const referenceInstructions = [
         isEditingExistingImage
           ? editInstructions
             ? `Edit the current panel image with this request: ${editInstructions}`
             : 'Edit the current panel image using the panel prompt. Preserve the existing composition and identity unless the prompt says otherwise.'
           : '',
-        selectedImageReferences.length > 0 ? panel.referencePrompt ?? '' : '',
+        selectedImageReferences.length > 0 ? targetPanel.referencePrompt ?? '' : '',
       ].filter(Boolean).join(' ')
-      const generationPrompt = isEditingExistingImage && editInstructions
-        ? `${panel.prompt?.trim() ? `${panel.prompt.trim()}\n\n` : ''}Edit request: ${editInstructions}`
-        : panel.prompt
-      const size = getPanelAspectSize(panel, page, imageModel)
-      const { imageUrl, interactionId } = await generatePanelImage({
+    const generationPrompt = isEditingExistingImage && editInstructions
+      ? `${targetPanel.prompt?.trim() ? `${targetPanel.prompt.trim()}\n\n` : ''}Edit request: ${editInstructions}`
+      : targetPanel.prompt
+    const targetResolution = imageResolutionOptions.includes(generationPanel.imageResolution)
+      ? generationPanel.imageResolution
+      : imageResolutionOptions[0] ?? '1K'
+    const size = getPanelAspectSize(generationPanel, targetPage, imageModel)
+    const { imageUrl, interactionId } = await generatePanelImage({
         prompt: generationPrompt,
         globalStyle,
         characters: selectedChars,
@@ -407,21 +415,89 @@ function PanelTab() {
         imageModel,
         quality: imageQuality,
         size,
-        imageResolution: activeImageResolution,
-        previousInteractionId: panel.geminiInteractionId ?? null,
+        imageResolution: targetResolution,
+        previousInteractionId: targetPanel.geminiInteractionId ?? null,
       })
-      const imageAssetId = await putImageAsset({
-        id: panel.imageAssetId || undefined,
+    const imageAssetId = await putImageAsset({
+        id: targetPanel.imageAssetId || undefined,
         dataUrl: imageUrl,
         source: 'panel',
-        label: `${page.title || 'Page'} - panel`,
+        label: `${targetPage.title || 'Page'} - panel`,
       })
-      updatePanel(panel.id, { imageUrl: null, imageAssetId, geminiInteractionId: interactionId })
+    updatePanel(targetPanel.id, {
+      imageUrl: null,
+      imageAssetId,
+      imageOffsetX: 0,
+      imageOffsetY: 0,
+      imageScale: 1,
+      imageSize: generationPanel.imageSize ?? 'auto',
+      imageResolution: targetResolution,
+      geminiInteractionId: interactionId,
+    })
+  }
+
+  const handleGenerateImage = async () => {
+    const apiKey       = localStorage.getItem('comic-oai-key')    ?? ''
+    const geminiApiKey = localStorage.getItem('comic-gemini-key') ?? ''
+    setGenState({ loading: true, error: '', mode: 'single' })
+    try {
+      await generateImageForPanel(panel, page, { apiKey, geminiApiKey })
       setGenState({ loading: false, error: '' })
     } catch (e) {
       setGenState({ loading: false, error: e.message })
     }
   }
+
+  const handleGenerateEmptyPagePanels = async () => {
+    if (!page || emptyPanelsToGenerate.length === 0) return
+    const apiKey       = localStorage.getItem('comic-oai-key')    ?? ''
+    const geminiApiKey = localStorage.getItem('comic-gemini-key') ?? ''
+    let completed = 0
+    setGenState({ loading: true, error: '', mode: 'page', done: 0, total: emptyPanelsToGenerate.length })
+    try {
+      for (let i = 0; i < emptyPanelsToGenerate.length; i += 1) {
+        setGenState({ loading: true, error: '', mode: 'page', done: i, total: emptyPanelsToGenerate.length })
+        await generateImageForPanel(emptyPanelsToGenerate[i], page, { apiKey, geminiApiKey })
+        completed = i + 1
+      }
+      setGenState({ loading: false, error: '', mode: 'page', done: emptyPanelsToGenerate.length, total: emptyPanelsToGenerate.length })
+    } catch (e) {
+      setGenState({
+        loading: false,
+        error: e.message,
+        mode: 'page',
+        done: completed,
+        total: emptyPanelsToGenerate.length,
+      })
+    }
+  }
+
+  const pageGenerateButton = (
+    <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-2.5 space-y-1.5">
+      <button
+        className={`w-full py-2 text-xs font-semibold rounded-lg transition-colors ${
+          genState.loading || emptyPanelsToGenerate.length === 0
+            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+            : 'bg-purple-700 hover:bg-purple-600 text-white'
+        }`}
+        onClick={handleGenerateEmptyPagePanels}
+        disabled={genState.loading || emptyPanelsToGenerate.length === 0}
+        title={
+          emptyPanelsToGenerate.length === 0
+            ? 'No empty prompted panels on this page'
+            : 'Generate images only for panels on this page that do not already have an image'
+        }
+      >
+        {genState.loading && genState.mode === 'page'
+          ? `Generating page ${genState.done ?? 0}/${genState.total ?? emptyPanelsToGenerate.length}`
+          : `Generate Empty Panels on Page (${emptyPanelsToGenerate.length})`}
+      </button>
+      <p className="text-xs text-gray-600 leading-relaxed">
+        Skips panels that already have an image. Panels without prompts are left empty.
+      </p>
+    </div>
+  )
+
   if (!panel) {
     return (
       <div className="p-3 space-y-4">
@@ -431,6 +507,7 @@ function PanelTab() {
           onPanelCount={setPanelCount}
           onPageLayout={setPageLayout}
         />
+        {pageGenerateButton}
         <div className="flex flex-col items-center justify-center gap-2 px-4 py-8 text-center border-t border-gray-800">
           <span className="text-4xl opacity-20 select-none">▭</span>
           <p className="text-xs text-gray-500">Select a panel in the canvas to edit its properties</p>
@@ -621,6 +698,10 @@ function PanelTab() {
             </div>
           )
         })()}
+
+        <div className="mb-2">
+          {pageGenerateButton}
+        </div>
 
         <div className="mb-2">
           <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">

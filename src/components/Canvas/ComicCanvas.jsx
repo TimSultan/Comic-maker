@@ -1,4 +1,4 @@
-import React, { useRef } from 'react'
+import React, { useCallback, useEffect, useRef } from 'react'
 import useComicStore from '../../store/useComicStore'
 import { BubbleShape } from '../PanelModal/BubbleShapes'
 import { getPanelLayout, getPanelPlacement } from '../../utils/defaults'
@@ -101,6 +101,104 @@ function getPlacementStyle(placement) {
 
 // ─── Panel / row resize handle ───────────────────────────────────
 
+function PanelImageInteractionLayer({ panel, panelRef, onSelect }) {
+  const dragRef = useRef(null)
+  const wheelSnapshotRef = useRef(null)
+  const wheelTimerRef = useRef(null)
+  const updatePanelLive = useComicStore(s => s.updatePanelLive)
+  const getHistorySnapshot = useComicStore(s => s.getHistorySnapshot)
+  const commitHistorySnapshot = useComicStore(s => s.commitHistorySnapshot)
+
+  const commitWheelZoom = useCallback(() => {
+    if (wheelTimerRef.current) {
+      clearTimeout(wheelTimerRef.current)
+      wheelTimerRef.current = null
+    }
+    if (!wheelSnapshotRef.current) return
+    commitHistorySnapshot(wheelSnapshotRef.current)
+    wheelSnapshotRef.current = null
+  }, [commitHistorySnapshot])
+
+  useEffect(() => {
+    return () => {
+      commitWheelZoom()
+    }
+  }, [commitWheelZoom])
+
+  const handleWheel = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    onSelect(panel.id)
+
+    if (!wheelSnapshotRef.current) wheelSnapshotRef.current = getHistorySnapshot()
+    const currentScale = Number.isFinite(panel.imageScale) ? panel.imageScale : 1
+    const nextScale = Math.max(0.25, Math.min(4, currentScale * (e.deltaY < 0 ? 1.08 : 0.92)))
+
+    updatePanelLive(panel.id, { imageScale: Number(nextScale.toFixed(3)) })
+    if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
+    wheelTimerRef.current = setTimeout(commitWheelZoom, 350)
+  }
+
+  const handlePointerDown = (e) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    commitWheelZoom()
+    onSelect(panel.id)
+
+    const rect = panelRef.current?.getBoundingClientRect()
+    if (!rect) return
+
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startOffsetX: panel.imageOffsetX ?? 0,
+      startOffsetY: panel.imageOffsetY ?? 0,
+      width: rect.width,
+      height: rect.height,
+      moved: false,
+      historySnapshot: getHistorySnapshot(),
+    }
+
+    const onPointerMove = (ev) => {
+      if (!dragRef.current) return
+      ev.preventDefault()
+      const dx = ev.clientX - dragRef.current.startX
+      const dy = ev.clientY - dragRef.current.startY
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragRef.current.moved = true
+      if (!dragRef.current.moved) return
+      updatePanelLive(panel.id, {
+        imageOffsetX: dragRef.current.startOffsetX + (dx / dragRef.current.width) * 100,
+        imageOffsetY: dragRef.current.startOffsetY + (dy / dragRef.current.height) * 100,
+      })
+    }
+
+    const onPointerUp = () => {
+      const drag = dragRef.current
+      if (drag?.moved) commitHistorySnapshot(drag.historySnapshot)
+      dragRef.current = null
+      document.removeEventListener('pointermove', onPointerMove)
+      document.removeEventListener('pointerup', onPointerUp)
+      document.removeEventListener('pointercancel', onPointerUp)
+    }
+
+    document.addEventListener('pointermove', onPointerMove)
+    document.addEventListener('pointerup', onPointerUp)
+    document.addEventListener('pointercancel', onPointerUp)
+  }
+
+  return (
+    <div
+      data-no-export
+      className="absolute inset-0"
+      style={{ zIndex: 1, cursor: 'grab', touchAction: 'none' }}
+      title="Drag to reframe - Scroll to zoom"
+      onPointerDown={handlePointerDown}
+      onWheel={handleWheel}
+    />
+  )
+}
+
 function ResizeHandle({ direction, position, idx, sizes, pageId, pageRef }) {
   const updatePageLive = useComicStore(s => s.updatePageLive)
   const getHistorySnapshot = useComicStore(s => s.getHistorySnapshot)
@@ -190,6 +288,14 @@ function ComicPanel({ panel, idx, placement, isSelected, onSelect, onBubbleClick
           offsetX={panel.imageOffsetX ?? 0}
           offsetY={panel.imageOffsetY ?? 0}
           scale={panel.imageScale ?? 1}
+        />
+      )}
+
+      {hasImage && (
+        <PanelImageInteractionLayer
+          panel={panel}
+          panelRef={panelRef}
+          onSelect={onSelect}
         />
       )}
 
@@ -329,9 +435,11 @@ export default function ComicCanvas() {
           ))}
         </div>
 
-        {(cols > 1 || rows > 1) && (
+        {(cols > 1 || rows > 1 || page.panels.some(panel => panel.imageUrl || panel.imageAssetId)) && (
           <p className="text-xs text-gray-600 select-none">
             Hover between panels to resize · Drag image to reframe
+            <br />
+            Scroll to zoom
           </p>
         )}
       </div>
