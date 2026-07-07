@@ -1,0 +1,339 @@
+﻿/**
+ * generatePanelImage
+ *
+ * Routes to the correct provider/endpoint based on model ID.
+ * Returns { imageUrl, interactionId } for all providers.
+ *
+ * For Gemini models:
+ *   1. Tries the Interactions API (multi-turn editing support)
+ *   2. Falls back to generateContent if Interactions API fails or returns no image
+ *
+ * interactionId is non-null when the Interactions API succeeds, enabling
+ * multi-turn editing on subsequent calls via previous_interaction_id.
+ */
+
+// --- Size -> aspect ratio ----------------------------------------
+const SIZE_TO_ASPECT = {
+  '1024x1024': '1:1',
+  '1024x1536': '3:4',
+  '1536x1024': '4:3',
+  '1024x1792': '9:16',
+  '1792x1024': '16:9',
+  '512x512':   '1:1',
+}
+function toAspect(size) {
+  if (size && !size.includes('x')) return size   // already '3:4' etc.
+  return SIZE_TO_ASPECT[size] ?? '3:4'
+}
+
+const ASPECT_TO_GENERATE_CONTENT_ENUM = {
+  '1:1': 'ASPECT_RATIO_ONE_BY_ONE',
+  '2:3': 'ASPECT_RATIO_TWO_BY_THREE',
+  '3:2': 'ASPECT_RATIO_THREE_BY_TWO',
+  '3:4': 'ASPECT_RATIO_THREE_BY_FOUR',
+  '4:3': 'ASPECT_RATIO_FOUR_BY_THREE',
+  '4:5': 'ASPECT_RATIO_FOUR_BY_FIVE',
+  '5:4': 'ASPECT_RATIO_FIVE_BY_FOUR',
+  '9:16': 'ASPECT_RATIO_NINE_BY_SIXTEEN',
+  '16:9': 'ASPECT_RATIO_SIXTEEN_BY_NINE',
+  '21:9': 'ASPECT_RATIO_TWENTY_ONE_BY_NINE',
+}
+
+const IMAGE_SIZE_TO_GENERATE_CONTENT_ENUM = {
+  '512': 'IMAGE_SIZE_FIVE_TWELVE',
+  '1K': 'IMAGE_SIZE_ONE_K',
+  '2K': 'IMAGE_SIZE_TWO_K',
+  '4K': 'IMAGE_SIZE_FOUR_K',
+}
+
+function toGenerateContentAspect(size) {
+  return ASPECT_TO_GENERATE_CONTENT_ENUM[toAspect(size)] ?? 'ASPECT_RATIO_THREE_BY_FOUR'
+}
+
+function toGenerateContentImageSize(imageResolution) {
+  return IMAGE_SIZE_TO_GENERATE_CONTENT_ENUM[imageResolution] ?? 'IMAGE_SIZE_ONE_K'
+}
+
+// --- Build enriched text prompt ----------------------------------
+function buildPrompt({ prompt, globalStyle, characters, styleReferences, imageReferences, referencePrompt }) {
+  const styleCtx = Object.entries(globalStyle)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(', ')
+
+  const charContext = characters.length
+    ? `Characters in this scene: ${characters
+        .map(c => c.description ? `${c.name} (${c.description})` : c.name)
+        .join('; ')}.`
+    : ''
+
+  const styleRefLabels = styleReferences
+    .filter(r => r.name && r.name !== 'Reference')
+    .map(r => r.name)
+    .join(', ')
+
+  const refLabels = imageReferences
+    .map(r => r.name)
+    .filter(Boolean)
+    .join(', ')
+
+  const refContext = imageReferences.length
+    ? [
+        `Use the attached reference image${imageReferences.length === 1 ? '' : 's'} for visual guidance${refLabels ? `: ${refLabels}` : ''}.`,
+        referencePrompt?.trim()
+          ? `Reference instructions: ${referencePrompt.trim()}.`
+          : 'No extra reference instructions were provided, so use the attached image references as visual reference only.',
+      ].join(' ')
+    : ''
+
+  return [
+    styleCtx       ? `Art style - ${styleCtx}.`                    : '',
+    styleRefLabels ? `Visual style inspired by: ${styleRefLabels}.` : '',
+    charContext,
+    refContext,
+    prompt.trim(),
+    'Comic book panel artwork. No speech bubbles, no thought bubbles, no captions, no text or lettering of any kind in the image.',
+  ].filter(Boolean).join(' ')
+}
+
+function dataUrlToInlineData(url) {
+  const match = /^data:([^;]+);base64,(.+)$/s.exec(url ?? '')
+  if (!match) return null
+  return {
+    inlineData: {
+      mimeType: match[1],
+      data: match[2],
+    },
+  }
+}
+
+function normalizeImageReferences(refs) {
+  const seen = new Set()
+  return refs
+    .filter(ref => ref?.url)
+    .filter(ref => {
+      if (seen.has(ref.url)) return false
+      seen.add(ref.url)
+      return true
+    })
+}
+
+// --- Extract image from various Gemini response shapes -----------
+function extractGeminiImage(data) {
+  // Interactions API shape: data.output_image
+  if (data.output_image?.data) {
+    return {
+      b64:  data.output_image.data,
+      mime: data.output_image.mime_type ?? 'image/png',
+      id:   data.id ?? null,
+    }
+  }
+  // generateContent shape: candidates[].content.parts[].inlineData
+  const part = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)
+  if (part?.inlineData?.data) {
+    return {
+      b64:  part.inlineData.data,
+      mime: part.inlineData.mimeType ?? 'image/png',
+      id:   null,
+    }
+  }
+  return null
+}
+
+// --- Google Gemini: Interactions API (multi-turn) ----------------
+async function callInteractionsAPI({ prompt, apiKey, model, size, imageResolution, previousInteractionId }) {
+  const body = {
+    model,
+    input: prompt,
+    response_format: { type: 'image', aspect_ratio: toAspect(size), image_size: imageResolution },
+  }
+  if (previousInteractionId) body.previous_interaction_id = previousInteractionId
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }
+  )
+  const data = await res.json()
+  if (!res.ok) return { ok: false, error: data.error?.message ?? `Google API error ${res.status}` }
+  return { ok: true, data }
+}
+
+// --- Google Gemini: generateContent fallback --------------------
+async function callGenerateContent({ prompt, apiKey, model, size, imageResolution = '1K', imageReferences = [] }) {
+  const imageParts = imageReferences
+    .map(ref => dataUrlToInlineData(ref.url))
+    .filter(Boolean)
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }, ...imageParts] }],
+        generationConfig: {
+          responseModalities: ['TEXT', 'IMAGE'],
+          responseFormat: {
+            image: {
+              aspectRatio: toGenerateContentAspect(size),
+              imageSize: toGenerateContentImageSize(imageResolution),
+            },
+          },
+        },
+      }),
+    }
+  )
+  const data = await res.json()
+  if (!res.ok) {
+    const msg  = data.error?.message ?? `Google API error ${res.status}`
+    const code = data.error?.code    ? ` (${data.error.code})` : ''
+    throw new Error(msg + code)
+  }
+  return { ok: true, data }
+}
+
+async function generateGemini({ prompt, apiKey, model, size, imageResolution = '1K', previousInteractionId, imageReferences = [] }) {
+  const hasImageReferences = imageReferences.length > 0
+
+  // 1. Try Interactions API first (enables multi-turn)
+  const intResult = hasImageReferences
+    ? { ok: false, error: null }
+    : await callInteractionsAPI({ prompt, apiKey, model, size, imageResolution, previousInteractionId })
+
+  if (intResult.ok) {
+    const img = extractGeminiImage(intResult.data)
+    if (img) {
+      return {
+        imageUrl: `data:${img.mime};base64,${img.b64}`,
+        interactionId: img.id,
+      }
+    }
+  }
+
+  // 2. Fall back to generateContent
+  const gcResult = await callGenerateContent({ prompt, apiKey, model, size, imageResolution, imageReferences })
+  const img = extractGeminiImage(gcResult.data)
+  if (img) {
+    return {
+      imageUrl: `data:${img.mime};base64,${img.b64}`,
+      interactionId: null,
+    }
+  }
+
+  // Surface the original Interactions API error if both fail
+  const errMsg = intResult.error ?? 'No image in Gemini response.'
+  throw new Error(errMsg)
+}
+
+// --- Google Imagen: predict endpoint ----------------------------
+async function generateImagen({ prompt, apiKey, model, size }) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instances:  [{ prompt }],
+        parameters: { sampleCount: 1, aspectRatio: toAspect(size) },
+      }),
+    }
+  )
+  const data = await res.json()
+  if (!res.ok) {
+    const msg  = data.error?.message ?? `Google API error ${res.status}`
+    const code = data.error?.code    ? ` (${data.error.code})` : ''
+    throw new Error(msg + code)
+  }
+  const b64  = data.predictions?.[0]?.bytesBase64Encoded
+  if (!b64) throw new Error('No image in Google Imagen response.')
+  const mime = data.predictions?.[0]?.mimeType ?? 'image/png'
+  return { imageUrl: `data:${mime};base64,${b64}`, interactionId: null }
+}
+
+// --- OpenAI: /v1/images/generations ----------------------------
+async function generateOpenAI({ prompt, apiKey, model, quality, size }) {
+  const pixelSize = size.includes('x') ? size : '1024x1536'
+  const res = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, prompt, n: 1, size: pixelSize, quality, output_format: 'png' }),
+  })
+  const data = await res.json()
+  if (!res.ok) {
+    const msg  = data.error?.message ?? `OpenAI API error ${res.status}`
+    const code = data.error?.code    ? ` (${data.error.code})` : ''
+    throw new Error(msg + code)
+  }
+  const b64 = data.data?.[0]?.b64_json
+  const url  = data.data?.[0]?.url
+  if (!b64 && !url) throw new Error('No image data in OpenAI response.')
+  return { imageUrl: b64 ? `data:image/png;base64,${b64}` : url, interactionId: null }
+}
+
+// --- Main export ------------------------------------------------
+export async function generatePanelImage({
+  prompt,
+  globalStyle           = {},
+  characters            = [],
+  styleReferences       = [],
+  imageReferences       = [],
+  referencePrompt       = '',
+  apiKey                = '',
+  geminiApiKey          = '',
+  imageModel            = 'gemini-3.1-flash-image',
+  quality               = 'medium',
+  size                  = '3:4',
+  imageResolution       = '1K',
+  previousInteractionId = null,
+}) {
+  const isGemini = imageModel.startsWith('gemini-')
+  const isImagen = imageModel.startsWith('imagen-')
+  const isGoogle = isGemini || isImagen
+  const key      = isGoogle ? geminiApiKey : apiKey
+
+  if (!key?.trim()) {
+    throw new Error(
+      isGoogle
+        ? 'No Google API key. Add it in the AI Fill settings (Google API Key field).'
+        : 'No OpenAI API key. Open AI Fill and enter your key.'
+    )
+  }
+  if (!prompt?.trim()) throw new Error('Panel has no prompt. Write a description first.')
+
+  const characterReferences = characters
+    .filter(c => c.imageUrl)
+    .map(c => ({
+      url: c.imageUrl,
+      name: `Character reference: ${c.name}`,
+      type: 'character',
+    }))
+  const styleImageReferences = styleReferences
+    .filter(r => r.url)
+    .map(r => ({
+      url: r.url,
+      name: r.name && r.name !== 'Reference' ? `Style reference: ${r.name}` : 'Style reference',
+      type: 'style',
+    }))
+  const allImageReferences = normalizeImageReferences([
+    ...characterReferences,
+    ...styleImageReferences,
+    ...imageReferences,
+  ])
+
+  const fullPrompt = buildPrompt({
+    prompt,
+    globalStyle,
+    characters,
+    styleReferences,
+    imageReferences: allImageReferences,
+    referencePrompt,
+  })
+
+  if (isGemini) return generateGemini({ prompt: fullPrompt, apiKey: key, model: imageModel, size, imageResolution, previousInteractionId, imageReferences: allImageReferences })
+  if (isImagen) return generateImagen({ prompt: fullPrompt, apiKey: key, model: imageModel, size })
+  return generateOpenAI({ prompt: fullPrompt, apiKey: key, model: imageModel, quality, size })
+}
