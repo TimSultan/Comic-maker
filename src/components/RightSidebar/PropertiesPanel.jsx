@@ -405,6 +405,7 @@ function PanelTab() {
     const size = getPanelAspectSize(generationPanel, targetPage, imageModel)
     const { imageUrl, interactionId } = await generatePanelImage({
         prompt: generationPrompt,
+        perspective: targetPanel.perspective,
         globalStyle,
         characters: selectedChars,
         styleReferences,
@@ -989,6 +990,40 @@ function StyleTab() {
 // ═══════════════════════════════════════════════════════════════
 
 function CharacterCard({ char, onUpdate, onRemove }) {
+  const globalStyle = useComicStore(s => s.globalStyle)
+  const imageModel = useComicStore(s => s.imageModel)
+  const imageQuality = useComicStore(s => s.imageQuality)
+  const [generating, setGenerating] = useState(false)
+  const [genError, setGenError] = useState('')
+
+  const handleGeneratePortrait = async () => {
+    const apiKey = localStorage.getItem('comic-oai-key') ?? ''
+    const geminiApiKey = localStorage.getItem('comic-gemini-key') ?? ''
+    setGenerating(true)
+    setGenError('')
+    try {
+      const prompt = [
+        `Character reference portrait of ${char.name || 'the character'}.`,
+        char.description?.trim() || '',
+        'Bust-up portrait, plain neutral background, clear well-lit view of the face and outfit, suitable as a consistent visual reference to reuse across many comic panels.',
+      ].filter(Boolean).join(' ')
+      const { imageUrl } = await generatePanelImage({
+        prompt,
+        globalStyle,
+        apiKey,
+        geminiApiKey,
+        imageModel,
+        quality: imageQuality,
+        size: '1:1',
+      })
+      onUpdate({ imageUrl })
+    } catch (e) {
+      setGenError(e.message)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
       {/* Reference image */}
@@ -1004,21 +1039,39 @@ function CharacterCard({ char, onUpdate, onRemove }) {
           </button>
         </div>
       ) : (
-        <label className="flex items-center justify-center gap-2 h-20 border-b border-dashed border-gray-700
-          cursor-pointer hover:bg-gray-700/40 transition-colors">
-          <span className="text-xs text-gray-500">📷 Reference Image</span>
-          <input
-            type="file" accept="image/*" className="hidden"
-            onChange={e => {
-              const file = e.target.files[0]
-              if (!file) return
-              const reader = new FileReader()
-              reader.onload = ev => onUpdate({ imageUrl: ev.target.result })
-              reader.readAsDataURL(file)
-              e.target.value = ''
-            }}
-          />
-        </label>
+        <div className="border-b border-dashed border-gray-700">
+          <div className="flex items-center">
+            <label className="flex-1 flex items-center justify-center gap-2 h-20
+              cursor-pointer hover:bg-gray-700/40 transition-colors">
+              <span className="text-xs text-gray-500">📷 Upload</span>
+              <input
+                type="file" accept="image/*" className="hidden"
+                onChange={e => {
+                  const file = e.target.files[0]
+                  if (!file) return
+                  const reader = new FileReader()
+                  reader.onload = ev => onUpdate({ imageUrl: ev.target.result })
+                  reader.readAsDataURL(file)
+                  e.target.value = ''
+                }}
+              />
+            </label>
+            <div className="w-px self-stretch bg-gray-700" />
+            <button
+              className="flex-1 flex items-center justify-center gap-2 h-20 text-xs text-gray-500
+                hover:bg-gray-700/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={handleGeneratePortrait}
+              disabled={generating}
+              title="Generate a reference portrait with AI"
+            >
+              {generating ? '⏳ Generating…' : '🪄 Generate'}
+            </button>
+          </div>
+          <p className="text-xs text-yellow-600 px-2.5 py-1.5 leading-relaxed">
+            No reference image — this character's appearance may drift between panels.
+          </p>
+          {genError && <p className="text-xs text-red-400 px-2.5 pb-1.5 leading-relaxed">{genError}</p>}
+        </div>
       )}
 
       {/* Name row */}

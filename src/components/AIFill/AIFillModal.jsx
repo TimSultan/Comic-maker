@@ -1,6 +1,34 @@
 import React, { useState, useEffect } from 'react'
 import useComicStore from '../../store/useComicStore'
-import { uid, TEXT_MODELS, IMAGE_MODELS, IMAGE_QUALITIES, getDefaultLayoutId, getGridDims } from '../../utils/defaults'
+import { uid, TEXT_MODELS, IMAGE_MODELS, IMAGE_QUALITIES, PANEL_LAYOUTS, getPanelLayout, getGridDims } from '../../utils/defaults'
+
+// ─── Shared prompt-building helpers ──────────────────────────────
+
+// Labeled, one-per-line — not a single flattened blob — so a model doesn't
+// weigh genre/mood/setting as if they were visual-style trivia.
+function formatStyleContext(globalStyle) {
+  const lines = [
+    globalStyle.artStyle     ? `Art style: ${globalStyle.artStyle}`         : '',
+    globalStyle.colorPalette ? `Color palette: ${globalStyle.colorPalette}` : '',
+    globalStyle.lineWeight   ? `Line weight: ${globalStyle.lineWeight}`     : '',
+    globalStyle.genre        ? `Genre: ${globalStyle.genre}`                : '',
+    globalStyle.mood         ? `Mood/tone: ${globalStyle.mood}`             : '',
+    globalStyle.setting      ? `Setting: ${globalStyle.setting}`            : '',
+  ].filter(Boolean)
+  return lines.length ? lines.join('\n') : 'unspecified'
+}
+
+// Compact, generated straight from PANEL_LAYOUTS (the single source of
+// truth the canvas itself renders from) so the catalog can never drift out
+// of sync with what layouts actually exist.
+function formatLayoutCatalog() {
+  return Object.entries(PANEL_LAYOUTS)
+    .map(([count, layouts]) => {
+      const options = layouts.map(l => `"${l.id}" (${l.label})`).join(', ')
+      return `  ${count} panel${count === '1' ? '' : 's'}: ${options}`
+    })
+    .join('\n')
+}
 
 // ─── OpenAI call ─────────────────────────────────────────────────
 
@@ -15,14 +43,9 @@ async function callOpenAI({ storyScript, globalStyle, characters, pageCount, pan
     ? characters.map(c => `"${c.name}"`).join(', ')
     : 'none'
 
-  const styleCtx = Object.entries(globalStyle)
-    .filter(([, v]) => v)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join(', ')
+  const systemPrompt = `You are a professional comic book scriptwriter and letterer. Given a story synopsis, generate a structured JSON script for a ${pageCount}-page comic.
 
-  const systemPrompt = `You are a professional comic book scriptwriter. Given a story synopsis, generate a structured JSON script for a ${pageCount}-page comic with exactly ${panelsPerPage} panels per page.
-
-Global art style: ${styleCtx || 'unspecified'}
+${formatStyleContext(globalStyle)}
 
 ═══ CHARACTER ROSTER ═══
 ${charLines}
@@ -34,10 +57,34 @@ CRITICAL RULE — Characters:
 • A panel may have zero, one, or several characters — only list those physically present in the scene
 • If no characters are defined, use empty arrays: "characters": []
 
+═══ STORY CRAFT ═══
+• Give the point-of-view character a clear want and a clear obstacle — don't just describe events, make something be at stake.
+• Escalate. Later pages should raise the tension or the cost of failure compared to earlier ones — avoid a flat, sample-of-scenes feel.
+• Land a real turn or payoff by the end — a reveal, a reversal, a consequence — not just a scene that stops.
+• Across the ${pageCount}-page arc: early page(s) establish character/situation, middle pages escalate complications, the final page(s) turn and resolve. Let both the writing AND the panel/layout choices below reflect that shape.
+
+═══ PAGE LAYOUT ═══
+Aim for roughly ${panelsPerPage} panels per page on average, but decide the exact panel count (1-9) and layout for EACH page individually based on pacing — don't make every page identical:
+• A single striking panel ("single" layout) suits a splash moment, a big reveal, or a page-ending cliffhanger.
+• A "feature" layout (one large panel plus several smaller ones, e.g. "1 + 2", "1 | 4", "1 + 5") suits a page with one beat that matters more than the rest — the large panel carries that beat, the small ones carry reactions or follow-through.
+• More, smaller, even panels (grids, columns, rows) speed pacing up for action or rapid dialogue exchanges.
+• Fewer, larger panels slow pacing down for quiet, emotional, or atmospheric beats.
+
+For each page, choose exactly one "layout" id below that matches the panel count you use, and supply exactly that many panels, in the layout's reading order (its panel positions, in array order, read left-to-right then top-to-bottom):
+${formatLayoutCatalog()}
+
+═══ PANELS ═══
 For each panel provide:
-- prompt: vivid image-generation prompt (include art style, named characters' appearance, action, setting, lighting, mood)
-- perspective: one of: close-up | medium-shot | wide-shot | bird's-eye | worm's-eye | over-shoulder | dutch-angle | establishing
-- bubbles: array of comic lettering objects. Each bubble: { type: "speech"|"thought"|"shout"|"whisper"|"caption"|"narration", style: "classic-comic"|"manga-dialogue"|"thought-soft"|"shout-burst"|"whisper-dashed"|"caption-box"|"narration-box"|"radio-electric"|"sfx-impact", text: string, x: 5-75, y: 5-80, width: 20-55 }
+- prompt: vivid image-generation prompt (art style, named characters' appearance, action, setting, lighting, mood). The pose and expression you describe must reflect the emotional tone of that panel's dialogue below — an angry or frightened line needs a pose/expression that shows it.
+- perspective: one of: close-up | medium-shot | wide-shot | bird's-eye | worm's-eye | over-shoulder | dutch-angle | establishing. Vary this across consecutive panels for visual rhythm — don't default to medium-shot throughout. Favor close-ups for emotional beats, wide/establishing shots for scene transitions and page openers.
+- bubbles: array of comic lettering objects, each { type, style, text, x: 5-75, y: 5-80, width: 20-55 }:
+  - type "speech": only actual spoken words, attributed to a character present in the panel.
+  - type "thought": interior monologue — use sparingly, only for real internal reflection.
+  - type "caption" or "narration": scene-setting, exposition, time/location jumps, or narrator commentary — use these instead of stuffing exposition into a character's spoken line.
+  - type "shout" or "sfx": reserved for genuine high-impact beats (yelling, impact sounds), not ordinary dialogue.
+  - style: one of "classic-comic"|"manga-dialogue"|"thought-soft"|"shout-burst"|"whisper-dashed"|"caption-box"|"narration-box"|"radio-electric"|"sfx-impact" — match style to type.
+  - Keep each bubble's text under about 15-20 words; split a longer line into multiple bubbles rather than one dense block.
+  - When a panel has more than one bubble, order them in natural reading order (top-to-bottom, left-to-right).
 - characters: array of exact character names present (from roster only)
 - notes: one concise director note
 
@@ -46,11 +93,12 @@ Respond ONLY with valid JSON — no markdown fences, no commentary:
   "pages": [
     {
       "title": "Page 1",
+      "layout": "three-bottom",
       "panels": [
         {
           "prompt": "...",
           "perspective": "medium-shot",
-          "bubbles": [{ "type": "speech", "text": "...", "x": 10, "y": 5, "width": 35 }],
+          "bubbles": [{ "type": "speech", "style": "classic-comic", "text": "...", "x": 10, "y": 5, "width": 35 }],
           "characters": ["ExactName"],
           "notes": "..."
         }
@@ -127,36 +175,45 @@ function applyResult(result, mergeMode) {
       return []
     })
 
-  const newPages = aiPages.map((pg, i) => {
-    const panels = (pg.panels ?? []).map(p => ({
-      id: uid(),
-      prompt: p.prompt ?? '',
-      perspective: p.perspective ?? 'medium-shot',
-      bubbles: (p.bubbles ?? []).map(b => ({ id: uid(), width: 35, ...b })),
-      characters: resolveChars(p.characters),
-      notes: p.notes ?? '',
-      styleOverride: null,
-      imageUrl: null,
-      imageAssetId: null,
-      imageSize: 'auto',
-      imageResolution: '1K',
-      referencePrompt: '',
-      referenceImageIds: [],
-      editPrompt: '',
-    }))
-    const panelCount = panels.length
-    const layoutId = getDefaultLayoutId(panelCount)
-    const { cols, rows } = getGridDims(panelCount, layoutId)
-    return {
-      id: uid(),
-      title: pg.title ?? `Page ${i + 1}`,
-      panelCount,
-      layoutId,
-      colSizes: Array(cols).fill(1),
-      rowSizes: Array(rows).fill(1),
-      panels,
-    }
-  })
+  const newPages = aiPages
+    .map((pg, i) => {
+      // PANEL_LAYOUTS only defines up to 9 panels — clamp defensively.
+      const panels = (pg.panels ?? []).slice(0, 9).map(p => ({
+        id: uid(),
+        prompt: p.prompt ?? '',
+        perspective: p.perspective ?? 'medium-shot',
+        bubbles: (p.bubbles ?? []).map(b => ({ id: uid(), width: 35, ...b })),
+        characters: resolveChars(p.characters),
+        notes: p.notes ?? '',
+        styleOverride: null,
+        imageUrl: null,
+        imageAssetId: null,
+        imageSize: 'auto',
+        imageResolution: '1K',
+        referencePrompt: '',
+        referenceImageIds: [],
+        editPrompt: '',
+      }))
+      const panelCount = panels.length
+      if (panelCount === 0) return null
+
+      // getPanelLayout falls back to that panel count's default layout
+      // whenever the AI's requested id doesn't match (unrecognized id, or
+      // it named a layout meant for a different panel count) — so a
+      // mismatch degrades gracefully instead of breaking the page.
+      const layoutId = getPanelLayout(panelCount, pg.layout).id
+      const { cols, rows } = getGridDims(panelCount, layoutId)
+      return {
+        id: uid(),
+        title: pg.title ?? `Page ${i + 1}`,
+        panelCount,
+        layoutId,
+        colSizes: Array(cols).fill(1),
+        rowSizes: Array(rows).fill(1),
+        panels,
+      }
+    })
+    .filter(Boolean)
 
   const existing = useComicStore.getState().pages
   const merged = mergeMode === 'replace'
@@ -172,21 +229,16 @@ function applyResult(result, mergeMode) {
 
 // ─── Concept → story script generator ───────────────────────────
 
-async function callGenerateScript({ concept, globalStyle, characters, apiKey, model }) {
+async function callGenerateScript({ concept, globalStyle, characters, pageCount, apiKey, model }) {
   const hasChars = characters.length > 0
   const charLines = hasChars
     ? characters.map(c => `  • "${c.name}"${c.description ? ` — ${c.description}` : ''}`).join('\n')
     : '  (none defined yet)'
   const charNameList = hasChars ? characters.map(c => `"${c.name}"`).join(', ') : 'none'
 
-  const styleCtx = Object.entries(globalStyle)
-    .filter(([, v]) => v)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join(', ')
-
   const systemPrompt = `You are a professional comic book writer. Expand the user's story concept into a rich, detailed scene-by-scene comic book script.
 
-Art style: ${styleCtx || 'unspecified'}
+${formatStyleContext(globalStyle)}
 
 ═══ CHARACTER ROSTER ═══
 ${charLines}
@@ -201,7 +253,13 @@ For each scene describe:
 - Natural dialog in quotation marks, attributed to the exact character name
 - Camera/composition hints (close-up, wide shot, bird's-eye, etc.)
 
-Write flowing prose. Be cinematic, specific, and emotionally engaging. This script will be parsed into comic panels, so clarity of who is doing what in each scene is essential.`
+═══ STORY CRAFT ═══
+- Give the point-of-view character a clear want and a clear obstacle — make something be at stake, don't just narrate events.
+- Escalate: later scenes should raise the tension or the cost of failure compared to earlier ones.
+- Build to a real turn or payoff — a reveal, a reversal, a consequence — not a scene that simply stops.
+- This script will fill roughly ${pageCount} comic page${pageCount === 1 ? '' : 's'}: shape it so early scenes establish, middle scenes escalate complications, and the final scene(s) turn and resolve.
+
+Write flowing prose. Be cinematic and specific. This script will be parsed into comic panels, so clarity of who is doing what — and what each character is feeling — in each scene is essential.`
 
   const res = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
@@ -294,7 +352,7 @@ export default function AIFillModal() {
     setScriptError('')
     setScriptStatus('Expanding concept into full script…')
     try {
-      const script = await callGenerateScript({ concept, globalStyle, characters, apiKey: apiKey.trim(), model: textModel })
+      const script = await callGenerateScript({ concept, globalStyle, characters, pageCount, apiKey: apiKey.trim(), model: textModel })
       setStoryScript(script)
       setScriptStatus('Script generated ✓')
       setTimeout(() => setScriptStatus(''), 2000)
@@ -572,7 +630,7 @@ The AI will automatically generate panel prompts, camera angles, speech bubbles,
               </div>
 
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Panels per page: <strong className="text-gray-300">{panelsPerPage}</strong></label>
+                <label className="text-xs text-gray-500 block mb-1">Typical panels per page: <strong className="text-gray-300">{panelsPerPage}</strong></label>
                 <input
                   type="range" min={1} max={9} step={1}
                   className="w-full accent-purple-500"
@@ -584,8 +642,10 @@ The AI will automatically generate panel prompts, camera angles, speech bubbles,
                 </div>
               </div>
 
-              <p className="text-xs text-gray-600">
-                Total panels: <strong className="text-gray-400">{pageCount * panelsPerPage}</strong>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                A target, not a fixed count — the AI varies panel count and
+                layout per page for pacing (e.g. a single splash panel for a
+                big beat). Roughly <strong className="text-gray-400">{pageCount * panelsPerPage}</strong> panels total.
               </p>
             </section>
 

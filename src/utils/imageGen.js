@@ -54,8 +54,28 @@ function toGenerateContentImageSize(imageResolution) {
   return IMAGE_SIZE_TO_GENERATE_CONTENT_ENUM[imageResolution] ?? 'IMAGE_SIZE_ONE_K'
 }
 
+// --- Shot/perspective -> concrete framing instruction -------------
+// Panels carry a "perspective" field (chosen by the AI or picked manually
+// in the panel editor), but it used to be display-only UI state — it never
+// reached the image model. This maps it to an explicit framing line.
+const PERSPECTIVE_FRAMING = {
+  'close-up':      "tight framing on the subject's face and upper body, filling most of the frame",
+  'medium-shot':   'framing from roughly the waist up, a balanced view of the subject and immediate surroundings',
+  'wide-shot':     'wide framing showing the full subject and their surroundings',
+  "bird's-eye":    'camera looking straight down from above',
+  "worm's-eye":    'camera looking sharply up from below',
+  'over-shoulder': "framed from behind one subject's shoulder, looking toward the other subject or action",
+  'dutch-angle':   'camera tilted off the horizontal for tension or unease',
+  'establishing':  'wide environmental shot establishing the location, with subjects small within the setting',
+}
+
+function describePerspective(perspective) {
+  const framing = PERSPECTIVE_FRAMING[perspective]
+  return framing ? `Shot: ${perspective} - ${framing}.` : ''
+}
+
 // --- Build enriched text prompt ----------------------------------
-function buildPrompt({ prompt, globalStyle, characters, styleReferences, imageReferences, referencePrompt }) {
+function buildPrompt({ prompt, globalStyle, characters, styleReferences, imageReferences, referencePrompt, perspective }) {
   const styleCtx = Object.entries(globalStyle)
     .filter(([, v]) => v)
     .map(([k, v]) => `${k}: ${v}`)
@@ -88,6 +108,7 @@ function buildPrompt({ prompt, globalStyle, characters, styleReferences, imageRe
 
   return [
     styleCtx       ? `Art style - ${styleCtx}.`                    : '',
+    describePerspective(perspective),
     styleRefLabels ? `Visual style inspired by: ${styleRefLabels}.` : '',
     charContext,
     refContext,
@@ -277,6 +298,7 @@ async function generateOpenAI({ prompt, apiKey, model, quality, size }) {
 // --- Main export ------------------------------------------------
 export async function generatePanelImage({
   prompt,
+  perspective           = '',
   globalStyle           = {},
   characters            = [],
   styleReferences       = [],
@@ -326,6 +348,7 @@ export async function generatePanelImage({
 
   const fullPrompt = buildPrompt({
     prompt,
+    perspective,
     globalStyle,
     characters,
     styleReferences,
