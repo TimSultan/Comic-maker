@@ -92,10 +92,10 @@ function GeneratableImageCard({
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden flex flex-col">
-      <div className={`relative group ${imageHeightClass}`}>
+      <div className={`relative group bg-gray-950 flex items-center justify-center ${imageHeightClass}`}>
         {imageUrl ? (
           <>
-            <img src={imageUrl} alt="" className="w-full h-full object-cover" />
+            <img src={imageUrl} alt="" className="max-w-full max-h-full object-contain" />
             <button
               className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center bg-red-700/80
                 hover:bg-red-600 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity"
