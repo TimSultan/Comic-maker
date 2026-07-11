@@ -88,6 +88,15 @@ export function getDefaultLookPrompt(globalStyle = {}) {
   return `Generate a front view and a back view of this character${styleText ? `, in this style: ${styleText}` : ''}. Use the attached reference images to keep the character's face, body, and outfit consistent.`
 }
 
+// --- Default prompt for a character's base reference portrait -------
+export function getDefaultCharacterPortraitPrompt(character = {}) {
+  return [
+    `Character reference portrait of ${character.name || 'the character'}.`,
+    character.description?.trim() || '',
+    'Bust-up portrait, plain neutral background, clear well-lit view of the face and outfit, suitable as a consistent visual reference to reuse across many comic panels.',
+  ].filter(Boolean).join(' ')
+}
+
 // --- Build enriched text prompt ----------------------------------
 function buildPrompt({ prompt, globalStyle, characters, styleReferences, imageReferences, referencePrompt, perspective }) {
   const styleCtx = formatGlobalStyle(globalStyle)

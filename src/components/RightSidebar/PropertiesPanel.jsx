@@ -10,7 +10,7 @@ import {
   getLayoutsForPanelCount,
   getPanelPlacement,
 } from '../../utils/defaults'
-import { generatePanelImage } from '../../utils/imageGen'
+import { generatePanelImage, getDefaultCharacterPortraitPrompt } from '../../utils/imageGen'
 import { deleteImageAsset, putImageAsset, resolveImageUrl } from '../../utils/imageStore'
 import { downloadDataUrlImage } from '../../utils/downloadImage'
 
@@ -1056,6 +1056,10 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
   const globalStyle = useComicStore(s => s.globalStyle)
   const imageModel = useComicStore(s => s.imageModel)
   const imageQuality = useComicStore(s => s.imageQuality)
+  const allCharacters = useComicStore(s => s.characters)
+  const pages = useComicStore(s => s.pages)
+  const styleReferences = useComicStore(s => s.styleReferences)
+  const projectImages = useComicStore(s => s.projectImages)
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState('')
 
@@ -1065,14 +1069,18 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
     setGenerating(true)
     setGenError('')
     try {
-      const prompt = [
-        `Character reference portrait of ${char.name || 'the character'}.`,
-        char.description?.trim() || '',
-        'Bust-up portrait, plain neutral background, clear well-lit view of the face and outfit, suitable as a consistent visual reference to reuse across many comic panels.',
-      ].filter(Boolean).join(' ')
+      const assetImages = collectProjectImages({ pages, characters: allCharacters, styleReferences, projectImages })
+      const referenceImages = assetImages.filter(img => (char.referenceImageIds ?? []).includes(img.id))
+      const resolvedRefs = (await Promise.all(referenceImages.map(async img => ({
+        url: await resolveImageUrl(img.url, img.assetId),
+        name: `${img.source} reference: ${img.label}`,
+        type: 'selected',
+      })))).filter(ref => ref.url)
+      const prompt = char.prompt?.trim() || getDefaultCharacterPortraitPrompt(char)
       const { imageUrl } = await generatePanelImage({
         prompt,
         globalStyle,
+        imageReferences: resolvedRefs,
         apiKey,
         geminiApiKey,
         imageModel,
@@ -1106,40 +1114,47 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
           </button>
         </div>
       ) : (
-        <div className="border-b border-dashed border-gray-700">
-          <div className="flex items-center">
-            <label className="flex-1 flex items-center justify-center gap-2 h-20
-              cursor-pointer hover:bg-gray-700/40 transition-colors">
-              <span className="text-xs text-gray-500">📷 Upload</span>
-              <input
-                type="file" accept="image/*" className="hidden"
-                onChange={e => {
-                  const file = e.target.files[0]
-                  if (!file) return
-                  const reader = new FileReader()
-                  reader.onload = ev => onUpdate({ imageUrl: ev.target.result })
-                  reader.readAsDataURL(file)
-                  e.target.value = ''
-                }}
-              />
-            </label>
-            <div className="w-px self-stretch bg-gray-700" />
-            <button
-              className="flex-1 flex items-center justify-center gap-2 h-20 text-xs text-gray-500
-                hover:bg-gray-700/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              onClick={handleGeneratePortrait}
-              disabled={generating}
-              title="Generate a reference portrait with AI"
-            >
-              {generating ? '⏳ Generating…' : '🪄 Generate'}
-            </button>
-          </div>
+        <div className="h-20 flex items-center justify-center border-b border-dashed border-gray-700 bg-gray-900/40">
+          <p className="text-xs text-gray-600 px-2.5 text-center leading-relaxed">No reference image yet</p>
+        </div>
+      )}
+
+      {/* Upload / Generate — always available, whether or not an image already exists */}
+      <div className="border-b border-dashed border-gray-700">
+        <div className="flex items-center">
+          <label className="flex-1 flex items-center justify-center gap-2 h-9
+            cursor-pointer hover:bg-gray-700/40 transition-colors">
+            <span className="text-xs text-gray-500">📷 Upload</span>
+            <input
+              type="file" accept="image/*" className="hidden"
+              onChange={e => {
+                const file = e.target.files[0]
+                if (!file) return
+                const reader = new FileReader()
+                reader.onload = ev => onUpdate({ imageUrl: ev.target.result })
+                reader.readAsDataURL(file)
+                e.target.value = ''
+              }}
+            />
+          </label>
+          <div className="w-px self-stretch bg-gray-700" />
+          <button
+            className="flex-1 flex items-center justify-center gap-2 h-9 text-xs text-gray-500
+              hover:bg-gray-700/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={handleGeneratePortrait}
+            disabled={generating}
+            title="Generate a reference portrait with AI, using the prompt and reference images set in Manage Looks"
+          >
+            {generating ? '⏳ Generating…' : char.imageUrl ? '🪄 Regenerate' : '🪄 Generate'}
+          </button>
+        </div>
+        {!char.imageUrl && (
           <p className="text-xs text-yellow-600 px-2.5 py-1.5 leading-relaxed">
             No reference image — this character's appearance may drift between panels.
           </p>
-          {genError && <p className="text-xs text-red-400 px-2.5 pb-1.5 leading-relaxed">{genError}</p>}
-        </div>
-      )}
+        )}
+        {genError && <p className="text-xs text-red-400 px-2.5 pb-1.5 leading-relaxed">{genError}</p>}
+      </div>
 
       {/* Name row */}
       <div className="flex items-center gap-2 px-2.5 pt-2 pb-1">

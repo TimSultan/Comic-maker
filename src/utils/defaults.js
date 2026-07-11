@@ -553,7 +553,7 @@ export function getGridDims(panelCount, layoutId = null) {
 }
 
 // --- Character looks (presets) --------------------------------------
-export const MAX_LOOK_REFERENCE_IMAGES = 6
+export const MAX_REFERENCE_IMAGES = 6
 
 // --- Tiny unique ID (non-cryptographic) ----------------------------
 export function uid() {
