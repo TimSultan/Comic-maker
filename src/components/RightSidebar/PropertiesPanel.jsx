@@ -470,8 +470,14 @@ function PanelTab() {
         imageResolution: targetResolution,
         previousInteractionId: targetPanel.geminiInteractionId ?? null,
       })
+    // Always write a fresh asset id (never reuse targetPanel.imageAssetId):
+    // PanelImage/StoredImage only re-fetch from IndexedDB when the
+    // imageUrl/assetId props they receive change, so overwriting the same
+    // id in place left the canvas showing the stale cached image after an
+    // edit. Reusing the id here was pointless anyway — multi-turn edit
+    // continuity is tracked separately via geminiInteractionId.
+    const previousAssetId = targetPanel.imageAssetId
     const imageAssetId = await putImageAsset({
-        id: targetPanel.imageAssetId || undefined,
         dataUrl: imageUrl,
         source: 'panel',
         label: `${targetPage.title || 'Page'} - panel`,
@@ -486,6 +492,9 @@ function PanelTab() {
       imageResolution: targetResolution,
       geminiInteractionId: interactionId,
     })
+    if (previousAssetId && previousAssetId !== imageAssetId) {
+      await deleteImageAsset(previousAssetId)
+    }
 
     if (useComicStore.getState().autoSaveImages) {
       const idx = targetPage.panels.findIndex(p => p.id === targetPanel.id)
