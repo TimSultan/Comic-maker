@@ -13,7 +13,7 @@ import {
   uid,
 } from '../../utils/defaults'
 import { generatePanelImage, getDefaultCharacterPortraitPrompt } from '../../utils/imageGen'
-import { deleteImageAsset, putImageAsset, resolveImageUrl } from '../../utils/imageStore'
+import { putImageAsset, resolveImageUrl } from '../../utils/imageStore'
 import { downloadDataUrlImage } from '../../utils/downloadImage'
 
 // ─── Compute the best API size/ratio for the current panel ───────
@@ -398,11 +398,9 @@ function PanelTab() {
   const emptyPanelsToGenerate = page?.panels.filter(p =>
     !(p.imageUrl || p.imageAssetId) && p.prompt?.trim()
   ) ?? []
-  const generateDisabled = genState.loading || (
-    isEditingExistingImage
-      ? !(panel.prompt?.trim() || panel.editPrompt?.trim())
-      : !panel?.prompt?.trim()
-  )
+  const generateFreshDisabled = genState.loading || !panel?.prompt?.trim()
+  const generateEditDisabled = genState.loading || !(panel?.prompt?.trim() || panel?.editPrompt?.trim())
+  const generateDisabled = isEditingExistingImage ? generateEditDisabled : generateFreshDisabled
 
   const handleReferenceToggle = (imageId) => {
     if (!panel) return
@@ -414,13 +412,13 @@ function PanelTab() {
     })
   }
 
-  const generateImageForPanel = async (targetPanel, targetPage, { apiKey, geminiApiKey, imageSize, imageResolution }) => {
+  const generateImageForPanel = async (targetPanel, targetPage, { apiKey, geminiApiKey, imageSize, imageResolution, freshGenerate = false }) => {
     const generationPanel = {
       ...targetPanel,
       imageSize: imageSize ?? targetPanel.imageSize,
       imageResolution: imageResolution ?? targetPanel.imageResolution,
     }
-    const isEditingExistingImage = Boolean(targetPanel.imageUrl || targetPanel.imageAssetId)
+    const isEditingExistingImage = !freshGenerate && Boolean(targetPanel.imageUrl || targetPanel.imageAssetId)
     const selectedChars = allCharacters
       .filter(c => targetPanel.characters?.includes(c.id))
       .map(c => resolveCharacterForPanel(c, targetPanel))
@@ -468,7 +466,7 @@ function PanelTab() {
         quality: imageQuality,
         size,
         imageResolution: targetResolution,
-        previousInteractionId: targetPanel.geminiInteractionId ?? null,
+        previousInteractionId: isEditingExistingImage ? (targetPanel.geminiInteractionId ?? null) : null,
       })
     // Always write a fresh asset id (never reuse targetPanel.imageAssetId):
     // PanelImage/StoredImage only re-fetch from IndexedDB when the
@@ -476,7 +474,13 @@ function PanelTab() {
     // id in place left the canvas showing the stale cached image after an
     // edit. Reusing the id here was pointless anyway — multi-turn edit
     // continuity is tracked separately via geminiInteractionId.
-    const previousAssetId = targetPanel.imageAssetId
+    //
+    // Deliberately never delete the old asset here: undo/redo can bring a
+    // panel's imageAssetId back to this previous value, and if the
+    // underlying IndexedDB record were gone by then the panel would go
+    // blank (a solid black box with no way to recover it from the canvas).
+    // Orphaned assets are accepted storage cost in exchange for undo/redo
+    // never resurrecting a dangling reference.
     const imageAssetId = await putImageAsset({
         dataUrl: imageUrl,
         source: 'panel',
@@ -492,9 +496,6 @@ function PanelTab() {
       imageResolution: targetResolution,
       geminiInteractionId: interactionId,
     })
-    if (previousAssetId && previousAssetId !== imageAssetId) {
-      await deleteImageAsset(previousAssetId)
-    }
 
     if (useComicStore.getState().autoSaveImages) {
       const idx = targetPage.panels.findIndex(p => p.id === targetPanel.id)
@@ -503,12 +504,12 @@ function PanelTab() {
     }
   }
 
-  const handleGenerateImage = async () => {
+  const handleGenerateImage = async (action = 'fresh') => {
     const apiKey       = localStorage.getItem('comic-oai-key')    ?? ''
     const geminiApiKey = localStorage.getItem('comic-gemini-key') ?? ''
-    setGenState({ loading: true, error: '', mode: 'single' })
+    setGenState({ loading: true, error: '', mode: 'single', action })
     try {
-      await generateImageForPanel(panel, page, { apiKey, geminiApiKey })
+      await generateImageForPanel(panel, page, { apiKey, geminiApiKey, freshGenerate: action === 'fresh' })
       setGenState({ loading: false, error: '' })
     } catch (e) {
       setGenState({ loading: false, error: e.message })
@@ -841,13 +842,22 @@ function PanelTab() {
 
         {/* Preview / placeholder */}
         {hasPanelImage ? (
-          <div className="relative group rounded-lg overflow-hidden border border-gray-700 mb-2">
+          // min-h so the clear button below stays reachable even if the
+          // image fails to resolve (e.g. a stale/orphaned asset id) — an
+          // empty StoredImage collapses this box to 0 height, which used to
+          // clip the absolutely-positioned button out of existence via
+          // overflow-hidden, leaving no way to clear a broken image.
+          <div className="relative group rounded-lg overflow-hidden border border-gray-700 mb-2 min-h-[6rem] bg-gray-950">
             <StoredImage src={panel.imageUrl} assetId={panel.imageAssetId} alt="Panel" className="w-full" />
             <button
               className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center bg-red-700/80
                 hover:bg-red-600 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity"
-              onClick={async () => {
-                await deleteImageAsset(panel.imageAssetId)
+              onClick={() => {
+                // Only clear this panel's reference to the image — never
+                // delete the underlying IndexedDB asset here. Undo/redo can
+                // restore this exact imageAssetId later, and if the record
+                // were already deleted the panel would come back blank with
+                // no way to recover it (see the note in generateImageForPanel).
                 updatePanel(panel.id, { imageUrl: null, imageAssetId: null, geminiInteractionId: null })
               }}
               title="Clear image and reset edit chain"
@@ -940,24 +950,47 @@ function PanelTab() {
           </div>
         )}
 
-        <button
-          className={`w-full py-2 text-xs font-semibold rounded-lg transition-colors ${
-            generateDisabled
-              ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-              : hasPanelImage
-              ? 'bg-indigo-700 hover:bg-indigo-600 text-white'
-              : 'bg-green-700 hover:bg-green-600 text-white'
-          }`}
-          onClick={handleGenerateImage}
-          disabled={generateDisabled}
-          title={generateDisabled ? 'Write a prompt first' : hasPanelImage ? 'Edit using current image and prompt' : ''}
-        >
-          {genState.loading
-            ? '⏳ Generating…'
-            : hasPanelImage
-            ? '✏️ Edit Image'
-            : '🎨 Generate Image'}
-        </button>
+        {hasPanelImage ? (
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              className={`py-2 text-xs font-semibold rounded-lg transition-colors ${
+                generateFreshDisabled
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  : 'bg-green-700 hover:bg-green-600 text-white'
+              }`}
+              onClick={() => handleGenerateImage('fresh')}
+              disabled={generateFreshDisabled}
+              title={generateFreshDisabled ? 'Write a panel prompt first' : 'Generate a brand new image from the panel prompt, replacing the current one'}
+            >
+              {genState.loading && genState.action === 'fresh' ? '⏳ Generating…' : '🎨 Generate'}
+            </button>
+            <button
+              className={`py-2 text-xs font-semibold rounded-lg transition-colors ${
+                generateEditDisabled
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  : 'bg-indigo-700 hover:bg-indigo-600 text-white'
+              }`}
+              onClick={() => handleGenerateImage('edit')}
+              disabled={generateEditDisabled}
+              title={generateEditDisabled ? 'Write a prompt first' : 'Edit using the current image and edit prompt'}
+            >
+              {genState.loading && genState.action === 'edit' ? '⏳ Editing…' : '✏️ Edit Image'}
+            </button>
+          </div>
+        ) : (
+          <button
+            className={`w-full py-2 text-xs font-semibold rounded-lg transition-colors ${
+              generateFreshDisabled
+                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-green-700 hover:bg-green-600 text-white'
+            }`}
+            onClick={() => handleGenerateImage('fresh')}
+            disabled={generateFreshDisabled}
+            title={generateFreshDisabled ? 'Write a prompt first' : ''}
+          >
+            {genState.loading ? '⏳ Generating…' : '🎨 Generate Image'}
+          </button>
+        )}
 
         {genState.error && (
           <div className="mt-1.5 p-2 rounded-lg bg-red-950/50 border border-red-800">
@@ -972,7 +1005,7 @@ function PanelTab() {
         )}
         {generateDisabled && !genState.loading && (
           <p className="text-xs text-gray-600 mt-1 text-center">
-            {hasPanelImage ? 'Write a panel prompt or edit prompt to enable editing.' : 'Write a prompt above to enable generation.'}
+            {hasPanelImage ? 'Write a panel prompt or edit prompt to enable generating or editing.' : 'Write a prompt above to enable generation.'}
           </p>
         )}
       </section>
@@ -1505,10 +1538,7 @@ function AssetsTab() {
                 image={{ ...image, source: 'Project' }}
                 editable
                 onRename={name => updateProjectImage(image.id, { name })}
-                onRemove={async () => {
-                  await deleteImageAsset(image.imageAssetId)
-                  removeProjectImage(image.id)
-                }}
+                onRemove={() => removeProjectImage(image.id)}
               />
             ))}
           </div>

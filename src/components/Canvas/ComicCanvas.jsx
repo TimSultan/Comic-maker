@@ -578,7 +578,7 @@ function ComicPanel({ panel, idx, placement, isSelected, onSelect, onBubbleClick
         data-no-export
         title={hasImage ? 'Replace image' : 'Add image'}
         className="absolute bottom-1.5 left-1.5 w-6 h-6 flex items-center justify-center rounded-md
-          bg-black/60 text-white text-xs hover:bg-black/80 transition-colors"
+          bg-black/50 text-white text-xs hover:bg-black/75 transition-colors"
         style={{ zIndex: 4 }}
         onMouseDown={e => e.stopPropagation()}
         onPointerDown={e => e.stopPropagation()}
@@ -586,6 +586,30 @@ function ComicPanel({ panel, idx, placement, isSelected, onSelect, onBubbleClick
       >
         📁
       </button>
+
+      {/* Delete image — only clears this panel's reference, never the
+          underlying IndexedDB asset (see generateImageForPanel: undo/redo
+          can bring an old imageAssetId back, and deleting the asset itself
+          would leave that state permanently blank). */}
+      {hasImage && (
+        <button
+          type="button"
+          data-no-export
+          title="Delete image"
+          className="absolute bottom-1.5 left-9 w-6 h-6 flex items-center justify-center rounded-md
+            bg-red-700/50 text-white text-xs hover:bg-red-700/75 transition-colors"
+          style={{ zIndex: 4 }}
+          onMouseDown={e => e.stopPropagation()}
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => {
+            e.stopPropagation()
+            onSelect(panel.id)
+            updatePanel(panel.id, { imageUrl: null, imageAssetId: null, geminiInteractionId: null })
+          }}
+        >
+          🗑
+        </button>
+      )}
 
       {/* Drag-over indicator */}
       {isDragOver && (
