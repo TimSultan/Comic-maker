@@ -6,9 +6,11 @@ import {
   PANEL_COUNTS,
   IMAGE_MODELS,
   IMAGE_QUALITIES,
+  MAX_REFERENCE_IMAGES,
   getGridDims,
   getLayoutsForPanelCount,
   getPanelPlacement,
+  uid,
 } from '../../utils/defaults'
 import { generatePanelImage, getDefaultCharacterPortraitPrompt } from '../../utils/imageGen'
 import { deleteImageAsset, putImageAsset, resolveImageUrl } from '../../utils/imageStore'
@@ -205,14 +207,24 @@ export function collectProjectImages({ pages, characters, styleReferences, proje
   })
 
   characters.forEach(char => {
-    if (char.imageUrl) {
+    // Every image ever uploaded/generated for this character (not just the
+    // current main one) is a valid reference candidate elsewhere in the app.
+    const galleryImages = char.images && char.images.length > 0
+      ? char.images
+      : (char.imageUrl ? [{ id: 'legacy-main', imageUrl: char.imageUrl }] : [])
+    const mainId = char.mainImageId ?? galleryImages[0]?.id
+    galleryImages.forEach(img => {
+      if (!img.imageUrl) return
+      const isMain = img.id === mainId
       images.push({
-        id: `character:${char.id}`,
-        url: char.imageUrl,
-        label: char.name || 'Character',
+        // Keep the main image's id stable as `character:<id>` for backward
+        // compatibility with projects saved before the gallery existed.
+        id: isMain ? `character:${char.id}` : `characterImage:${char.id}:${img.id}`,
+        url: img.imageUrl,
+        label: isMain ? (char.name || 'Character') : `${char.name || 'Character'} (alt)`,
         source: 'Character',
       })
-    }
+    })
     ;(char.looks || []).forEach(look => {
       if (look.imageUrl) {
         images.push({
@@ -1062,6 +1074,52 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
   const projectImages = useComicStore(s => s.projectImages)
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState('')
+  const [expanded, setExpanded] = useState(false)
+  const [referencePickerOpen, setReferencePickerOpen] = useState(false)
+
+  const assetImages = collectProjectImages({ pages, characters: allCharacters, styleReferences, projectImages })
+
+  // Every image ever uploaded or generated for this character is kept here
+  // so past attempts aren't lost — one of them is picked as the active
+  // "main" reference (character.imageUrl, read everywhere else in the app).
+  const storedImages = char.images ?? []
+  const currentUrlTracked = char.imageUrl && storedImages.some(img => img.imageUrl === char.imageUrl)
+  const images = char.imageUrl && !currentUrlTracked
+    ? [...storedImages, { id: char.mainImageId || 'external-main', imageUrl: char.imageUrl }]
+    : storedImages
+  const mainId = char.mainImageId ?? images.find(img => img.imageUrl === char.imageUrl)?.id ?? images[0]?.id ?? null
+  const mainImage = images.find(img => img.id === mainId) ?? null
+
+  const referenceIds = char.referenceImageIds ?? []
+  const referenceImages = assetImages.filter(img => referenceIds.includes(img.id))
+
+  const toggleReference = (imageId) => {
+    if (referenceIds.includes(imageId)) {
+      onUpdate({ referenceImageIds: referenceIds.filter(id => id !== imageId) })
+      return
+    }
+    if (referenceIds.length >= MAX_REFERENCE_IMAGES) return
+    onUpdate({ referenceImageIds: [...referenceIds, imageId] })
+  }
+
+  const selectMain = (img) => {
+    onUpdate({ images, mainImageId: img.id, imageUrl: img.imageUrl })
+  }
+
+  const deleteImage = (imgId) => {
+    const nextImages = images.filter(img => img.id !== imgId)
+    const nextMain = imgId === mainId ? nextImages[0] ?? null : images.find(img => img.id === mainId)
+    onUpdate({
+      images: nextImages,
+      mainImageId: nextMain?.id ?? null,
+      imageUrl: nextMain?.imageUrl ?? null,
+    })
+  }
+
+  const addImage = (imageUrl) => {
+    const newImg = { id: uid(), imageUrl }
+    onUpdate({ images: [...images, newImg], mainImageId: newImg.id, imageUrl: newImg.imageUrl })
+  }
 
   const handleGeneratePortrait = async () => {
     const apiKey = localStorage.getItem('comic-oai-key') ?? ''
@@ -1069,8 +1127,6 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
     setGenerating(true)
     setGenError('')
     try {
-      const assetImages = collectProjectImages({ pages, characters: allCharacters, styleReferences, projectImages })
-      const referenceImages = assetImages.filter(img => (char.referenceImageIds ?? []).includes(img.id))
       const resolvedRefs = (await Promise.all(referenceImages.map(async img => ({
         url: await resolveImageUrl(img.url, img.assetId),
         name: `${img.source} reference: ${img.label}`,
@@ -1087,7 +1143,7 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
         quality: imageQuality,
         size: '1:1',
       })
-      onUpdate({ imageUrl })
+      addImage(imageUrl)
       if (useComicStore.getState().autoSaveImages) {
         const slug = (char.name || 'character').replace(/\s+/g, '-').toLowerCase()
         downloadDataUrlImage(imageUrl, `${slug}-portrait-${Date.now()}.png`)
@@ -1101,14 +1157,19 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
-      {/* Reference image */}
-      {char.imageUrl ? (
-        <div className="relative group">
-          <img src={char.imageUrl} alt={char.name} className="w-full h-28 object-cover" />
+      {/* Main reference image — shown in full (no crop); click to expand/minimize */}
+      {mainImage ? (
+        <div
+          className={`relative group bg-gray-950 flex items-center justify-center overflow-hidden cursor-zoom-in transition-[height] duration-200 ${expanded ? 'h-96' : 'h-44'}`}
+          onClick={() => setExpanded(v => !v)}
+          title={expanded ? 'Click to minimize' : 'Click to expand'}
+        >
+          <img src={mainImage.imageUrl} alt={char.name} className="max-w-full max-h-full object-contain" />
           <button
             className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center bg-red-700/80
               hover:bg-red-600 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity"
-            onClick={() => onUpdate({ imageUrl: null })}
+            onClick={e => { e.stopPropagation(); deleteImage(mainImage.id) }}
+            title="Delete this image"
           >
             ×
           </button>
@@ -1116,6 +1177,36 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
       ) : (
         <div className="h-20 flex items-center justify-center border-b border-dashed border-gray-700 bg-gray-900/40">
           <p className="text-xs text-gray-600 px-2.5 text-center leading-relaxed">No reference image yet</p>
+        </div>
+      )}
+
+      {/* Gallery of every uploaded/generated image — click one to make it the main reference */}
+      {images.length > 1 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto p-1.5 border-b border-dashed border-gray-700 bg-gray-900/40">
+          {images.map(img => (
+            <div
+              key={img.id}
+              className={`relative group w-10 h-10 rounded-md overflow-hidden border-2 shrink-0 bg-gray-950 transition-colors ${
+                img.id === mainId ? 'border-purple-500' : 'border-gray-700 hover:border-gray-500'
+              }`}
+            >
+              <button
+                className="w-full h-full flex items-center justify-center"
+                onClick={() => selectMain(img)}
+                title={img.id === mainId ? 'Main reference' : 'Set as main reference'}
+              >
+                <img src={img.imageUrl} alt="" className="max-w-full max-h-full object-contain" />
+              </button>
+              <button
+                className="absolute -top-0.5 -right-0.5 w-4 h-4 flex items-center justify-center bg-red-700/90
+                  hover:bg-red-600 text-white text-[10px] leading-none rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={e => { e.stopPropagation(); deleteImage(img.id) }}
+                title="Delete this image"
+              >
+                ×
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -1131,7 +1222,7 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
                 const file = e.target.files[0]
                 if (!file) return
                 const reader = new FileReader()
-                reader.onload = ev => onUpdate({ imageUrl: ev.target.result })
+                reader.onload = ev => addImage(ev.target.result)
                 reader.readAsDataURL(file)
                 e.target.value = ''
               }}
@@ -1143,18 +1234,54 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
               hover:bg-gray-700/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={handleGeneratePortrait}
             disabled={generating}
-            title="Generate a reference portrait with AI, using the prompt and reference images set in Manage Looks"
+            title="Generate a reference portrait with AI, using the prompt (set in Manage Looks) and any images added below"
           >
-            {generating ? '⏳ Generating…' : char.imageUrl ? '🪄 Regenerate' : '🪄 Generate'}
+            {generating ? '⏳ Generating…' : mainImage ? '🪄 Regenerate' : '🪄 Generate'}
           </button>
         </div>
-        {!char.imageUrl && (
+        {!mainImage && (
           <p className="text-xs text-yellow-600 px-2.5 py-1.5 leading-relaxed">
             No reference image — this character's appearance may drift between panels.
           </p>
         )}
         {genError && <p className="text-xs text-red-400 px-2.5 pb-1.5 leading-relaxed">{genError}</p>}
       </div>
+
+      {/* Reference images fed to the AI when generating this character's look */}
+      <div className="border-b border-dashed border-gray-700 p-2 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <button
+            className="text-xs px-2 py-1 rounded-md bg-gray-900 hover:bg-gray-700 text-gray-300 border border-gray-700 transition-colors"
+            onClick={() => setReferencePickerOpen(true)}
+          >
+            + Add reference
+          </button>
+          <span className="text-xs text-gray-500 shrink-0">{referenceIds.length}/{MAX_REFERENCE_IMAGES}</span>
+        </div>
+        {referenceImages.length > 0 && (
+          <div className="flex gap-1.5 overflow-x-auto">
+            {referenceImages.map(img => (
+              <button
+                key={img.id}
+                className="relative w-9 h-9 rounded-md overflow-hidden border border-gray-700 shrink-0"
+                title={`Remove ${img.label}`}
+                onClick={() => toggleReference(img.id)}
+              >
+                <StoredImage src={img.url} assetId={img.assetId} alt="" className="w-full h-full object-cover" />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <ReferenceImagePicker
+        open={referencePickerOpen}
+        images={assetImages}
+        selectedIds={referenceIds}
+        onToggle={toggleReference}
+        onClose={() => setReferencePickerOpen(false)}
+        maxSelected={MAX_REFERENCE_IMAGES}
+      />
 
       {/* Name row */}
       <div className="flex items-center gap-2 px-2.5 pt-2 pb-1">
