@@ -331,8 +331,8 @@ export function ReferenceImagePicker({ open, images, selectedIds, onToggle, onCl
                   }`}
                   onClick={() => onToggle(image.id)}
                 >
-                  <div className="relative aspect-square bg-gray-950">
-                    <StoredImage src={image.url} assetId={image.assetId} alt="" className="w-full h-full object-cover" />
+                  <div className="relative aspect-square bg-gray-950 flex items-center justify-center">
+                    <StoredImage src={image.url} assetId={image.assetId} alt="" className="max-w-full max-h-full object-contain" />
                     {selected && (
                       <span className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-purple-600 text-white text-xs flex items-center justify-center">
                         ✓
@@ -1272,11 +1272,11 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
             {referenceImages.map(img => (
               <button
                 key={img.id}
-                className="relative w-9 h-9 rounded-md overflow-hidden border border-gray-700 shrink-0"
+                className="relative w-9 h-9 rounded-md overflow-hidden border border-gray-700 shrink-0 bg-gray-950 flex items-center justify-center"
                 title={`Remove ${img.label}`}
                 onClick={() => toggleReference(img.id)}
               >
-                <StoredImage src={img.url} assetId={img.assetId} alt="" className="w-full h-full object-cover" />
+                <StoredImage src={img.url} assetId={img.assetId} alt="" className="max-w-full max-h-full object-contain" />
               </button>
             ))}
           </div>

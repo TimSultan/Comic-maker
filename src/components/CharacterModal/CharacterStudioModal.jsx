@@ -163,11 +163,11 @@ function GeneratableImageCard({
             {referenceImages.map(img => (
               <button
                 key={img.id}
-                className="relative w-10 h-10 rounded-md overflow-hidden border border-gray-700 shrink-0"
+                className="relative w-10 h-10 rounded-md overflow-hidden border border-gray-700 shrink-0 bg-gray-950 flex items-center justify-center"
                 title={`Remove ${img.label}`}
                 onClick={() => toggleReference(img.id)}
               >
-                <StoredImage src={img.url} assetId={img.assetId} alt="" className="w-full h-full object-cover" />
+                <StoredImage src={img.url} assetId={img.assetId} alt="" className="max-w-full max-h-full object-contain" />
               </button>
             ))}
           </div>
