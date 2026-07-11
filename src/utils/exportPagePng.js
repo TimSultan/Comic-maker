@@ -35,7 +35,7 @@ function canvasBlob(canvas) {
   })
 }
 
-export async function exportPageAsPng(pageElement, fileName, { hideBubbles = false } = {}) {
+export async function renderPageCanvas(pageElement, { hideBubbles = false } = {}) {
   if (!pageElement) throw new Error('No rendered page found to export.')
   await Promise.all([...pageElement.querySelectorAll('img')].map(waitForImage))
 
@@ -107,6 +107,13 @@ export async function exportPageAsPng(pageElement, fileName, { hideBubbles = fal
       })
     },
   })
+  return canvas
+}
+
+export async function exportPageAsPng(pageElement, fileName, options = {}) {
+  const canvas = await renderPageCanvas(pageElement, options)
   const blob = await canvasBlob(canvas)
   downloadBlob(blob, `${safeFileName(fileName)}.png`)
 }
+
+export { safeFileName }

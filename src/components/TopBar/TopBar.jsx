@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import useComicStore from '../../store/useComicStore'
 import { exportPageAsPng } from '../../utils/exportPagePng'
+import { exportComicAsPdf } from '../../utils/exportComicPdf'
 import { migrateProjectImagesToAssets } from '../../utils/imageStore'
 
 // ─── Menu data ───────────────────────────────────────────────────
@@ -17,7 +18,7 @@ const FILE_MENU = [
   { separator: true },
   { label: 'Export PNG', action: 'export-png' },
   { label: 'Export PNG (No Text)', action: 'export-png-no-text' },
-  { label: 'Export PDF', action: 'export-pdf', disabled: true, hint: '(Phase 6)' },
+  { label: 'Export PDF (All Pages)', action: 'export-pdf' },
 ]
 
 const VIEW_MENU = [
@@ -139,8 +140,10 @@ export default function TopBar() {
 
   const [editingTitle, setEditingTitle] = useState(false)
   const [projectFileName, setProjectFileName] = useState('')
+  const [exportingPdf, setExportingPdf] = useState(false)
   const fileInputRef = useRef(null)
   const projectFileHandleRef = useRef(null)
+  const pdfExportingRef = useRef(false)
 
   const getProjectData = useCallback(() => {
     const {
@@ -336,10 +339,36 @@ export default function TopBar() {
         }
         break
       }
+      case 'export-pdf': {
+        if (pdfExportingRef.current) break
+        pdfExportingRef.current = true
+        setExportingPdf(true)
+        try {
+          const state = useComicStore.getState()
+          await exportComicAsPdf({
+            pages: state.pages,
+            selectedPageId: state.selectedPageId,
+            selectPage: state.selectPage,
+            comicTitle: state.comicTitle,
+          })
+        } catch (err) {
+          alert('Failed to export PDF: ' + err.message)
+        } finally {
+          pdfExportingRef.current = false
+          setExportingPdf(false)
+        }
+        break
+      }
       default:
         break
     }
   }, [applyProjectData, downloadProjectJson, getProjectData, projectFileName, toggleLeftSidebar, toggleRightSidebar, writeProjectFile])
+
+  const fileMenu = FILE_MENU.map(item =>
+    item.action === 'export-pdf'
+      ? { ...item, label: exportingPdf ? 'Exporting PDF…' : item.label, disabled: exportingPdf }
+      : item,
+  )
 
     return (
     <>
@@ -398,7 +427,7 @@ export default function TopBar() {
       </div>
 
       {/* Menu dropdowns */}
-      <div className="shrink-0"><Dropdown label="File" items={FILE_MENU} onAction={handleAction} /></div>
+      <div className="shrink-0"><Dropdown label="File" items={fileMenu} onAction={handleAction} /></div>
       <div className="shrink-0"><Dropdown label="Edit" items={EDIT_MENU} onAction={handleAction} /></div>
       <div className="shrink-0"><Dropdown label="View" items={VIEW_MENU} onAction={handleAction} /></div>
 
