@@ -552,6 +552,9 @@ export function getGridDims(panelCount, layoutId = null) {
   return { cols: layout.cols, rows: layout.rows }
 }
 
+// --- Character looks (presets) --------------------------------------
+export const MAX_LOOK_REFERENCE_IMAGES = 6
+
 // --- Tiny unique ID (non-cryptographic) ----------------------------
 export function uid() {
   return Math.random().toString(36).slice(2, 9) + Date.now().toString(36)

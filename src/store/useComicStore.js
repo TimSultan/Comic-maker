@@ -58,6 +58,18 @@ export function createPanel(overrides = {}) {
     referenceImageIds: [],
     editPrompt: '',
     geminiInteractionId: null,  // Gemini Interactions API id for multi-turn editing
+    characterLooks: {},     // { [characterId]: lookId } — preset/look override per character in this panel
+    ...overrides,
+  }
+}
+
+export function createCharacterLook(overrides = {}) {
+  return {
+    id: uid(),
+    name: 'New Look',
+    imageUrl: null,
+    prompt: '',
+    referenceImageIds: [],   // up to MAX_LOOK_REFERENCE_IMAGES asset ids used when generating this look
     ...overrides,
   }
 }
@@ -171,6 +183,10 @@ const useComicStore = create((set, get) => {
   panelEditModalOpen: false,
   panelEditModalPanelId: null,
   panelEditModalInitialBubbleId: null,
+
+  // ── Character studio modal ───────────────────────────────────
+  characterManagerOpen: false,
+  characterManagerCharacterId: null,
 
   undoStack: [],
   redoStack: [],
@@ -397,6 +413,7 @@ const useComicStore = create((set, get) => {
         description: '',
         imageUrl: null,
         color: '#8b5cf6',
+        looks: [],
         ...data,
       },
     ],
@@ -404,10 +421,61 @@ const useComicStore = create((set, get) => {
 
   removeCharacter: (id) => trackedSet((state) => ({
     characters: state.characters.filter(c => c.id !== id),
+    pages: state.pages.map(page => ({
+      ...page,
+      panels: page.panels.map(panel => {
+        if (!panel.characterLooks || !(id in panel.characterLooks)) return panel
+        const characterLooks = { ...panel.characterLooks }
+        delete characterLooks[id]
+        return { ...panel, characterLooks }
+      }),
+    })),
   })),
 
   updateCharacter: (id, updates) => trackedSet((state) => ({
     characters: state.characters.map(c => (c.id === id ? { ...c, ...updates } : c)),
+  })),
+
+  // ═══ Character look (preset) actions ═════════════════════════════
+
+  addCharacterLook: (characterId, data = {}) => trackedSet((state) => ({
+    characters: state.characters.map(c => (c.id === characterId
+      ? { ...c, looks: [...(c.looks || []), createCharacterLook(data)] }
+      : c)),
+  })),
+
+  updateCharacterLook: (characterId, lookId, updates) => trackedSet((state) => ({
+    characters: state.characters.map(c => (c.id === characterId
+      ? { ...c, looks: (c.looks || []).map(l => (l.id === lookId ? { ...l, ...updates } : l)) }
+      : c)),
+  })),
+
+  removeCharacterLook: (characterId, lookId) => trackedSet((state) => ({
+    characters: state.characters.map(c => (c.id === characterId
+      ? { ...c, looks: (c.looks || []).filter(l => l.id !== lookId) }
+      : c)),
+    pages: state.pages.map(page => ({
+      ...page,
+      panels: page.panels.map(panel => {
+        if (panel.characterLooks?.[characterId] !== lookId) return panel
+        const characterLooks = { ...panel.characterLooks }
+        delete characterLooks[characterId]
+        return { ...panel, characterLooks }
+      }),
+    })),
+  })),
+
+  setPanelCharacterLook: (panelId, characterId, lookId) => trackedSet((state) => ({
+    pages: state.pages.map(page => ({
+      ...page,
+      panels: page.panels.map(panel => {
+        if (panel.id !== panelId) return panel
+        const characterLooks = { ...(panel.characterLooks || {}) }
+        if (lookId) characterLooks[characterId] = lookId
+        else delete characterLooks[characterId]
+        return { ...panel, characterLooks }
+      }),
+    })),
   })),
 
   // ═══ Style reference actions ══════════════════════════════════
@@ -459,6 +527,10 @@ const useComicStore = create((set, get) => {
     panelEditModalInitialBubbleId: bubbleId,
   }),
   closePanelEditModal: () => set({ panelEditModalOpen: false, panelEditModalPanelId: null, panelEditModalInitialBubbleId: null }),
+
+  openCharacterManager: (characterId = null) => set({ characterManagerOpen: true, characterManagerCharacterId: characterId }),
+  closeCharacterManager: () => set({ characterManagerOpen: false }),
+  setCharacterManagerCharacterId: (characterId) => set({ characterManagerCharacterId: characterId }),
 
   // ═══ AI fill modal ════════════════════════════════════════════
 

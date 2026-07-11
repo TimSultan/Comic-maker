@@ -189,7 +189,7 @@ function PageLayoutSection({ page, pageLayouts, onPanelCount, onPageLayout }) {
   )
 }
 
-function collectProjectImages({ pages, characters, styleReferences, projectImages }) {
+export function collectProjectImages({ pages, characters, styleReferences, projectImages }) {
   const images = []
 
   ;(projectImages || []).forEach(image => {
@@ -213,6 +213,16 @@ function collectProjectImages({ pages, characters, styleReferences, projectImage
         source: 'Character',
       })
     }
+    ;(char.looks || []).forEach(look => {
+      if (look.imageUrl) {
+        images.push({
+          id: `characterLook:${char.id}:${look.id}`,
+          url: look.imageUrl,
+          label: `${char.name || 'Character'} - ${look.name || 'Look'}`,
+          source: 'Character look',
+        })
+      }
+    })
   })
 
   styleReferences.forEach(ref => {
@@ -243,8 +253,28 @@ function collectProjectImages({ pages, characters, styleReferences, projectImage
   return images
 }
 
-function ReferenceImagePicker({ open, images, selectedIds, onToggle, onClose }) {
+// ─── Resolve a per-panel character look (preset) override ─────────
+
+function resolveCharacterLook(character, panel) {
+  const lookId = panel?.characterLooks?.[character.id]
+  if (!lookId) return null
+  return character.looks?.find(look => look.id === lookId) ?? null
+}
+
+function resolveCharacterForPanel(character, panel) {
+  const look = resolveCharacterLook(character, panel)
+  if (!look) return character
+  return {
+    ...character,
+    imageUrl: look.imageUrl || character.imageUrl,
+    description: [character.description, look.name ? `Look: ${look.name}` : ''].filter(Boolean).join(' — '),
+  }
+}
+
+export function ReferenceImagePicker({ open, images, selectedIds, onToggle, onClose, maxSelected = null }) {
   if (!open) return null
+
+  const limitReached = maxSelected != null && selectedIds.length >= maxSelected
 
   return (
     <div
@@ -255,7 +285,9 @@ function ReferenceImagePicker({ open, images, selectedIds, onToggle, onClose }) 
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
           <div>
             <h3 className="text-sm font-semibold text-white">Select Reference Images</h3>
-            <p className="text-xs text-gray-500 mt-0.5">{selectedIds.length} selected</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {selectedIds.length}{maxSelected != null ? ` / ${maxSelected}` : ''} selected
+            </p>
           </div>
           <button
             className="w-8 h-8 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white"
@@ -273,12 +305,16 @@ function ReferenceImagePicker({ open, images, selectedIds, onToggle, onClose }) 
           <div className="grid grid-cols-3 gap-2 p-3 overflow-y-auto">
             {images.map(image => {
               const selected = selectedIds.includes(image.id)
+              const disabled = !selected && limitReached
               return (
                 <button
                   key={image.id}
+                  disabled={disabled}
                   className={`text-left rounded-md border overflow-hidden transition-all ${
                     selected
                       ? 'border-purple-500 bg-purple-950/40'
+                      : disabled
+                      ? 'border-gray-800 bg-gray-800/50 opacity-40 cursor-not-allowed'
                       : 'border-gray-700 bg-gray-800 hover:border-gray-500'
                   }`}
                   onClick={() => onToggle(image.id)}
@@ -328,7 +364,7 @@ function PanelTab() {
   const allCharacters    = useComicStore(s => s.characters)
   const styleReferences  = useComicStore(s => s.styleReferences)
   const projectImages    = useComicStore(s => s.projectImages)
-  const { updatePanel, setPanelCount, setPageLayout, openPanelEditModal, setImageModel, setImageQuality } = useComicStore()
+  const { updatePanel, setPanelCount, setPageLayout, openPanelEditModal, setImageModel, setImageQuality, setPanelCharacterLook } = useComicStore()
 
   const [genState, setGenState] = useState({ loading: false, error: '' })
   const [referencePickerOpen, setReferencePickerOpen] = useState(false)
@@ -373,7 +409,9 @@ function PanelTab() {
       imageResolution: imageResolution ?? targetPanel.imageResolution,
     }
     const isEditingExistingImage = Boolean(targetPanel.imageUrl || targetPanel.imageAssetId)
-    const selectedChars = allCharacters.filter(c => targetPanel.characters?.includes(c.id))
+    const selectedChars = allCharacters
+      .filter(c => targetPanel.characters?.includes(c.id))
+      .map(c => resolveCharacterForPanel(c, targetPanel))
     const selectedPanelReferenceImages = assetImages.filter(image => (targetPanel.referenceImageIds ?? []).includes(image.id))
     const currentPanelImageUrl = await resolveImageUrl(targetPanel.imageUrl, targetPanel.imageAssetId)
     const currentImageReference = isEditingExistingImage && currentPanelImageUrl
@@ -602,46 +640,64 @@ function PanelTab() {
           <div className="flex flex-wrap gap-1.5">
             {allCharacters.map(char => {
               const selected = panel.characters?.includes(char.id) ?? false
+              const hasLooks = (char.looks?.length ?? 0) > 0
+              const currentLookId = panel.characterLooks?.[char.id] ?? ''
               return (
-                <button
-                  key={char.id}
-                  title={char.description || char.name}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs transition-all border ${
-                    selected
-                      ? 'border-transparent font-semibold text-white'
-                      : 'border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-300'
-                  }`}
-                  style={selected ? { background: char.color ?? '#8b5cf6' } : {}}
-                  onClick={() => {
-                    const current = panel.characters ?? []
-                    updatePanel(panel.id, {
-                      characters: selected
-                        ? current.filter(id => id !== char.id)
-                        : [...current, char.id],
-                    })
-                  }}
-                >
-                  {char.imageUrl ? (
-                    <img src={char.imageUrl} alt="" className="w-4 h-4 rounded-full object-cover shrink-0" />
-                  ) : (
-                    <span className="w-3 h-3 rounded-full shrink-0 inline-block" style={{ background: char.color ?? '#8b5cf6' }} />
+                <div key={char.id} className="flex items-center gap-1">
+                  <button
+                    title={char.description || char.name}
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs transition-all border ${
+                      selected
+                        ? 'border-transparent font-semibold text-white'
+                        : 'border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-300'
+                    }`}
+                    style={selected ? { background: char.color ?? '#8b5cf6' } : {}}
+                    onClick={() => {
+                      const current = panel.characters ?? []
+                      updatePanel(panel.id, {
+                        characters: selected
+                          ? current.filter(id => id !== char.id)
+                          : [...current, char.id],
+                      })
+                    }}
+                  >
+                    {char.imageUrl ? (
+                      <img src={char.imageUrl} alt="" className="w-4 h-4 rounded-full object-cover shrink-0" />
+                    ) : (
+                      <span className="w-3 h-3 rounded-full shrink-0 inline-block" style={{ background: char.color ?? '#8b5cf6' }} />
+                    )}
+                    {char.name}
+                  </button>
+                  {selected && hasLooks && (
+                    <select
+                      className="text-xs bg-gray-800 border border-gray-700 rounded-md px-1 py-1 text-gray-300 focus:outline-none focus:border-purple-500 transition-colors"
+                      value={currentLookId}
+                      onChange={e => setPanelCharacterLook(panel.id, char.id, e.target.value || null)}
+                      title="Pick a saved look/preset for this character in this panel"
+                    >
+                      <option value="">Default look</option>
+                      {char.looks.map(look => (
+                        <option key={look.id} value={look.id}>{look.name || 'Look'}</option>
+                      ))}
+                    </select>
                   )}
-                  {char.name}
-                </button>
+                </div>
               )
             })}
           </div>
         )}
 
         {/* Show summary of what gets sent to the image API */}
-        {(panel.characters?.length ?? 0) > 0 && (
-          <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">
-            {panel.characters.length} character{panel.characters.length !== 1 ? 's' : ''}
-            {allCharacters.filter(c => panel.characters?.includes(c.id) && c.imageUrl).length > 0 &&
-              ` + ${allCharacters.filter(c => panel.characters?.includes(c.id) && c.imageUrl).length} ref image${allCharacters.filter(c => panel.characters?.includes(c.id) && c.imageUrl).length !== 1 ? 's' : ''}`
-            } will be sent with the image prompt.
-          </p>
-        )}
+        {(panel.characters?.length ?? 0) > 0 && (() => {
+          const selectedCharacters = allCharacters.filter(c => panel.characters?.includes(c.id))
+          const withRef = selectedCharacters.filter(c => resolveCharacterForPanel(c, panel).imageUrl).length
+          return (
+            <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">
+              {panel.characters.length} character{panel.characters.length !== 1 ? 's' : ''}
+              {withRef > 0 && ` + ${withRef} ref image${withRef !== 1 ? 's' : ''}`} will be sent with the image prompt.
+            </p>
+          )
+        })()}
       </section>
 
       {/* ── Director Notes ── */}
@@ -996,7 +1052,7 @@ function StyleTab() {
 //  Characters Tab
 // ═══════════════════════════════════════════════════════════════
 
-function CharacterCard({ char, onUpdate, onRemove }) {
+function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
   const globalStyle = useComicStore(s => s.globalStyle)
   const imageModel = useComicStore(s => s.imageModel)
   const imageQuality = useComicStore(s => s.imageQuality)
@@ -1110,7 +1166,7 @@ function CharacterCard({ char, onUpdate, onRemove }) {
       </div>
 
       {/* Description */}
-      <div className="px-2.5 pb-2.5">
+      <div className="px-2.5 pb-2.5 space-y-2">
         <textarea
           className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-400
             resize-none focus:outline-none focus:border-purple-500 transition-colors mt-1"
@@ -1119,6 +1175,13 @@ function CharacterCard({ char, onUpdate, onRemove }) {
           value={char.description ?? ''}
           onChange={e => onUpdate({ description: e.target.value })}
         />
+        <button
+          className="w-full py-1.5 text-xs rounded-lg border border-gray-700 text-gray-400
+            hover:border-purple-500 hover:text-purple-300 transition-colors"
+          onClick={onManageLooks}
+        >
+          🎭 Manage Looks {(char.looks?.length ?? 0) > 0 ? `(${char.looks.length})` : ''} →
+        </button>
       </div>
     </div>
   )
@@ -1126,7 +1189,7 @@ function CharacterCard({ char, onUpdate, onRemove }) {
 
 function CharactersTab() {
   const characters = useComicStore(s => s.characters)
-  const { addCharacter, removeCharacter, updateCharacter } = useComicStore()
+  const { addCharacter, removeCharacter, updateCharacter, openCharacterManager } = useComicStore()
 
   return (
     <div className="p-3 space-y-3">
@@ -1155,6 +1218,7 @@ function CharactersTab() {
               char={char}
               onUpdate={u => updateCharacter(char.id, u)}
               onRemove={() => removeCharacter(char.id)}
+              onManageLooks={() => openCharacterManager(char.id)}
             />
           ))}
         </div>

@@ -184,6 +184,7 @@ function applyResult(result, mergeMode) {
         perspective: p.perspective ?? 'medium-shot',
         bubbles: (p.bubbles ?? []).map(b => ({ id: uid(), width: 35, ...b })),
         characters: resolveChars(p.characters),
+        characterLooks: {},
         notes: p.notes ?? '',
         styleOverride: null,
         imageUrl: null,

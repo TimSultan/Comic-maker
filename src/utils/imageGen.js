@@ -74,17 +74,34 @@ function describePerspective(perspective) {
   return framing ? `Shot: ${perspective} - ${framing}.` : ''
 }
 
-// --- Build enriched text prompt ----------------------------------
-function buildPrompt({ prompt, globalStyle, characters, styleReferences, imageReferences, referencePrompt, perspective }) {
-  const styleCtx = Object.entries(globalStyle)
+// --- Global style -> flat text used both in prompts and in the UI ---
+export function formatGlobalStyle(globalStyle = {}) {
+  return Object.entries(globalStyle)
     .filter(([, v]) => v)
     .map(([k, v]) => `${k}: ${v}`)
     .join(', ')
+}
 
+// --- Default prompt prefilled when a new character look is created --
+export function getDefaultLookPrompt(globalStyle = {}) {
+  const styleText = formatGlobalStyle(globalStyle)
+  return `Generate a front view and a back view of this character${styleText ? `, in this style: ${styleText}` : ''}. Use the attached reference images to keep the character's face, body, and outfit consistent.`
+}
+
+// --- Build enriched text prompt ----------------------------------
+function buildPrompt({ prompt, globalStyle, characters, styleReferences, imageReferences, referencePrompt, perspective }) {
+  const styleCtx = formatGlobalStyle(globalStyle)
+
+  const hasCharacterRefs = imageReferences.some(ref => ref.type === 'character')
   const charContext = characters.length
-    ? `Characters in this scene: ${characters
-        .map(c => c.description ? `${c.name} (${c.description})` : c.name)
-        .join('; ')}.`
+    ? [
+        `Characters in this scene: ${characters
+          .map(c => c.description ? `${c.name} (${c.description})` : c.name)
+          .join('; ')}.`,
+        hasCharacterRefs
+          ? "Follow each character's attached reference image for their appearance (face, body, outfit, and colors) — keep it consistent and do not change it unless explicitly instructed otherwise in this prompt."
+          : '',
+      ].filter(Boolean).join(' ')
     : ''
 
   const styleRefLabels = styleReferences

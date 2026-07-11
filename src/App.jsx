@@ -4,6 +4,7 @@ import PageNavigator from './components/LeftSidebar/PageNavigator'
 import ComicCanvas from './components/Canvas/ComicCanvas'
 import PropertiesPanel from './components/RightSidebar/PropertiesPanel'
 import PanelEditModal from './components/PanelModal/PanelEditModal'
+import CharacterStudioModal from './components/CharacterModal/CharacterStudioModal'
 import AIFillModal from './components/AIFill/AIFillModal'
 import DebugPanel from './components/DebugPanel'
 import useComicStore from './store/useComicStore'
@@ -21,6 +22,7 @@ export default function App() {
         {showRightSidebar && <PropertiesPanel />}
       </div>
       <PanelEditModal />
+      <CharacterStudioModal />
       <AIFillModal />
       <DebugPanel />
     </div>
