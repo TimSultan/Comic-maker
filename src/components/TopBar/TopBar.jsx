@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import useComicStore from '../../store/useComicStore'
 import { exportPageAsPng } from '../../utils/exportPagePng'
 import { migrateProjectImagesToAssets } from '../../utils/imageStore'
@@ -33,32 +34,65 @@ const EDIT_MENU = [
 
 function Dropdown({ label, items, onAction }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef(null)
+  const [menuPos, setMenuPos] = useState(null)
+  const buttonWrapRef = useRef(null)
+  const menuRef = useRef(null)
 
+  const close = useCallback(() => setOpen(false), [])
+
+  // The menu is portaled to <body> and positioned with fixed coords instead
+  // of being an absolutely-positioned child here, because the TopBar row it
+  // lives in needs overflow-x-auto for horizontal scrolling on narrow
+  // screens — and since overflow-x isn't 'visible', the browser also clips
+  // overflow-y, cutting the dropdown off at the bar's bottom edge. Portaling
+  // escapes that clipping ancestor entirely.
   useEffect(() => {
-    if (!open) return
-    const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    if (!open) return undefined
+    const handleClickOutside = (e) => {
+      if (buttonWrapRef.current?.contains(e.target)) return
+      if (menuRef.current?.contains(e.target)) return
+      close()
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
+    document.addEventListener('mousedown', handleClickOutside)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [open, close])
+
+  const handleToggle = () => {
+    setOpen(v => {
+      const next = !v
+      if (next && buttonWrapRef.current) {
+        const rect = buttonWrapRef.current.getBoundingClientRect()
+        setMenuPos({ top: rect.bottom + 2, left: rect.left })
+      }
+      return next
+    })
+  }
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={buttonWrapRef} className="relative">
       <button
         className={`px-3 h-8 text-sm rounded transition-colors select-none ${
           open
             ? 'bg-gray-700 text-white'
             : 'text-gray-300 hover:bg-gray-700 hover:text-white'
         }`}
-        onClick={() => setOpen(v => !v)}
+        onClick={handleToggle}
       >
         {label}
       </button>
 
-      {open && (
-        <div className="absolute top-full left-0 mt-0.5 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl z-50 py-1.5 min-w-[200px]">
+      {open && menuPos && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed bg-gray-800 border border-gray-600 rounded-lg shadow-2xl z-50 py-1.5 min-w-[200px]"
+          style={{ top: menuPos.top, left: menuPos.left }}
+        >
           {items.map((item, i) =>
             item.separator ? (
               <div key={i} className="my-1 border-t border-gray-700" />
@@ -71,7 +105,7 @@ function Dropdown({ label, items, onAction }) {
                     ? 'text-gray-600 cursor-not-allowed'
                     : 'text-gray-300 hover:bg-gray-700 hover:text-white'
                   }`}
-                onClick={() => { onAction(item.action); setOpen(false) }}
+                onClick={() => { onAction(item.action); close() }}
               >
                 <span>{item.label}</span>
                 <span className="text-xs text-gray-500 shrink-0">
@@ -80,7 +114,8 @@ function Dropdown({ label, items, onAction }) {
               </button>
             ),
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
