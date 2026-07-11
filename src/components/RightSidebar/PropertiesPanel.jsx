@@ -1344,14 +1344,23 @@ function CharactersTab() {
 
   return (
     <div className="p-3 space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-1.5">
         <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Characters</span>
-        <button
-          className="text-xs px-2.5 py-1 rounded bg-purple-700 hover:bg-purple-600 text-white transition-colors"
-          onClick={() => addCharacter()}
-        >
-          + Add
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            className="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-400 hover:border-purple-500 hover:text-purple-300 transition-colors"
+            onClick={() => openCharacterManager()}
+            title="Open Character Studio to manage the full cast and their looks"
+          >
+            🎭 Studio
+          </button>
+          <button
+            className="text-xs px-2.5 py-1 rounded bg-purple-700 hover:bg-purple-600 text-white transition-colors"
+            onClick={() => addCharacter()}
+          >
+            + Add
+          </button>
+        </div>
       </div>
 
       {characters.length === 0 ? (
