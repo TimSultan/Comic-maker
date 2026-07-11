@@ -398,7 +398,7 @@ export default function AIFillModal() {
     >
       <div
         className="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-        style={{ width: '92vw', maxWidth: 1100, height: '88vh' }}
+        style={{ width: '96vw', maxWidth: 1100, height: '94vh' }}
       >
         {/* ─ Header ─ */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0">
@@ -406,7 +406,7 @@ export default function AIFillModal() {
             <h2 className="text-sm font-semibold text-white flex items-center gap-2">
               <span>✨</span> Story &amp; AI Fill
             </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="text-xs text-gray-500 mt-0.5 hidden sm:block">
               Write your story — then let AI fill all pages, panels, prompts and dialog automatically
             </p>
           </div>
@@ -419,10 +419,10 @@ export default function AIFillModal() {
         </div>
 
         {/* ─ Body: two-pane ─ */}
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
 
           {/* ── Left: Story script editor ── */}
-          <div className="flex-1 flex flex-col border-r border-gray-700">
+          <div className="flex-1 min-h-0 flex flex-col border-r border-gray-700">
             {/* Concept section */}
           <div className="shrink-0 border-b border-gray-800 p-3 space-y-2 bg-gray-950/40">
             <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider">
@@ -477,7 +477,7 @@ The AI will automatically generate panel prompts, camera angles, speech bubbles,
           </div>
 
           {/* ── Right: Settings + Generate ── */}
-          <div className="w-80 shrink-0 flex flex-col bg-gray-900 overflow-y-auto">
+          <div className="w-full md:w-80 h-[45vh] md:h-auto shrink-0 flex flex-col bg-gray-900 overflow-y-auto border-t md:border-t-0">
 
             {/* API Keys */}
             <section className="p-4 border-b border-gray-800 space-y-3">

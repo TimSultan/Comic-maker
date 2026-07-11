@@ -123,7 +123,7 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
   const getHistorySnapshot = useComicStore(s => s.getHistorySnapshot)
   const commitHistorySnapshot = useComicStore(s => s.commitHistorySnapshot)
 
-  const handleMouseDown = useCallback((e) => {
+  const handlePointerDown = useCallback((e) => {
     e.stopPropagation()
     onSelect(bubble.id)
 
@@ -139,7 +139,7 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
     const grabOffsetY = e.clientY - panelTop - (bubble.y / 100) * panelH
     const historySnapshot = getHistorySnapshot()
 
-    const onMouseMove = (ev) => {
+    const onPointerMove = (ev) => {
       const newX = ((ev.clientX - panelLeft - grabOffsetX) / panelW) * 100
       const newY = ((ev.clientY - panelTop - grabOffsetY) / panelH) * 100
       onMove(bubble.id, {
@@ -148,17 +148,19 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
       })
     }
 
-    const onMouseUp = () => {
+    const onPointerUp = () => {
       commitHistorySnapshot(historySnapshot)
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('pointermove', onPointerMove)
+      document.removeEventListener('pointerup', onPointerUp)
+      document.removeEventListener('pointercancel', onPointerUp)
     }
 
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('pointermove', onPointerMove)
+    document.addEventListener('pointerup', onPointerUp)
+    document.addEventListener('pointercancel', onPointerUp)
   }, [bubble.id, bubble.x, bubble.y, commitHistorySnapshot, getHistorySnapshot, onSelect, onMove])
 
-  const handleTailMouseDown = useCallback((e) => {
+  const handleTailPointerDown = useCallback((e) => {
     e.preventDefault()
     e.stopPropagation()
     onSelect(bubble.id)
@@ -177,17 +179,19 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
       })
     }
 
-    const onMouseUp = () => {
+    const onPointerUp = () => {
       commitHistorySnapshot(historySnapshot)
-      document.removeEventListener('mousemove', updateTarget)
-      document.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('pointermove', updateTarget)
+      document.removeEventListener('pointerup', onPointerUp)
+      document.removeEventListener('pointercancel', onPointerUp)
     }
 
-    document.addEventListener('mousemove', updateTarget)
-    document.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('pointermove', updateTarget)
+    document.addEventListener('pointerup', onPointerUp)
+    document.addEventListener('pointercancel', onPointerUp)
   }, [bubble.id, bubble.tail, commitHistorySnapshot, getHistorySnapshot, onSelect, onTailUpdate])
 
-  const handleBaseMouseDown = useCallback((e) => {
+  const handleBasePointerDown = useCallback((e) => {
     e.preventDefault()
     e.stopPropagation()
     onSelect(bubble.id)
@@ -206,17 +210,19 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
       })
     }
 
-    const onMouseUp = () => {
+    const onPointerUp = () => {
       commitHistorySnapshot(historySnapshot)
-      document.removeEventListener('mousemove', updateBase)
-      document.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('pointermove', updateBase)
+      document.removeEventListener('pointerup', onPointerUp)
+      document.removeEventListener('pointercancel', onPointerUp)
     }
 
-    document.addEventListener('mousemove', updateBase)
-    document.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('pointermove', updateBase)
+    document.addEventListener('pointerup', onPointerUp)
+    document.addEventListener('pointercancel', onPointerUp)
   }, [bubble.id, bubble.tail, commitHistorySnapshot, getHistorySnapshot, onSelect, onTailUpdate])
 
-  const handleResizeMouseDown = useCallback((e) => {
+  const handleResizePointerDown = useCallback((e) => {
     e.preventDefault()
     e.stopPropagation()
     onSelect(bubble.id)
@@ -235,7 +241,7 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
     const fontSizeLocked = bubble.typography?.fontSizeLocked === true
     const historySnapshot = getHistorySnapshot()
 
-    const onMouseMove = (ev) => {
+    const onPointerMove = (ev) => {
       const rightEdgePct = ((ev.clientX - panelLeft) / panelW) * 100
       const bottomEdgePct = ((ev.clientY - panelTop) / panelH) * 100
       const nextWidth = Math.max(10, Math.min(95 - (bubble.x ?? 0), rightEdgePct - (bubble.x ?? 0)))
@@ -252,14 +258,16 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
       onResize(bubble.id, updates)
     }
 
-    const onMouseUp = () => {
+    const onPointerUp = () => {
       commitHistorySnapshot(historySnapshot)
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('pointermove', onPointerMove)
+      document.removeEventListener('pointerup', onPointerUp)
+      document.removeEventListener('pointercancel', onPointerUp)
     }
 
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('pointermove', onPointerMove)
+    document.addEventListener('pointerup', onPointerUp)
+    document.addEventListener('pointercancel', onPointerUp)
   }, [bubble.height, bubble.id, bubble.typography, bubble.width, bubble.x, bubble.y, commitHistorySnapshot, getHistorySnapshot, onResize, onSelect])
 
   const tail = bubble.tail || {}
@@ -268,6 +276,7 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
 
   return (
     <div
+      className="touch-none"
       style={{
         position: 'absolute',
         left: `${bubble.x}%`,
@@ -282,13 +291,13 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
         boxSizing: 'border-box',
         pointerEvents: 'auto',
       }}
-      onMouseDown={handleMouseDown}
+      onPointerDown={handlePointerDown}
     >
       <BubbleShape bubble={bubble} />
       {showTailHandle && (
         <>
           <div
-            className="absolute w-3 h-3 rounded-full bg-sky-400 border-2 border-white shadow cursor-crosshair"
+            className="absolute w-3 h-3 rounded-full bg-sky-400 border-2 border-white shadow cursor-crosshair touch-none"
             style={{
               left: `${baseHandle.x}%`,
               top: `${baseHandle.y}%`,
@@ -296,10 +305,10 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
               zIndex: 20,
             }}
             title={baseHandle.automatic ? 'Drag tail base (auto)' : 'Drag tail base'}
-            onMouseDown={handleBaseMouseDown}
+            onPointerDown={handleBasePointerDown}
           />
           <div
-            className="absolute w-3 h-3 rounded-full bg-purple-400 border-2 border-white shadow cursor-crosshair"
+            className="absolute w-3 h-3 rounded-full bg-purple-400 border-2 border-white shadow cursor-crosshair touch-none"
             style={{
               left: `${tail.targetX ?? 18}%`,
               top: `${tail.targetY ?? 94}%`,
@@ -307,20 +316,20 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
               zIndex: 20,
             }}
             title="Drag tail target"
-            onMouseDown={handleTailMouseDown}
+            onPointerDown={handleTailPointerDown}
           />
         </>
       )}
       {isSelected && (
         <div
-          className="absolute w-3.5 h-3.5 bg-purple-500 border-2 border-white shadow cursor-nwse-resize"
+          className="absolute w-3.5 h-3.5 bg-purple-500 border-2 border-white shadow cursor-nwse-resize touch-none"
           style={{
             right: -7,
             bottom: -7,
             zIndex: 21,
           }}
           title="Drag to resize bubble"
-          onMouseDown={handleResizeMouseDown}
+          onPointerDown={handleResizePointerDown}
         />
       )}
       {isSelected && (
@@ -334,6 +343,7 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
           }}
           title="Delete bubble"
           onMouseDown={e => e.stopPropagation()}
+          onPointerDown={e => e.stopPropagation()}
           onClick={e => { e.stopPropagation(); onDelete(bubble.id) }}
         >
           ×
@@ -410,10 +420,15 @@ function PanelImageInteractionLayer({ panel, canvasRef, onClickPoint }) {
     return () => wheelTarget.removeEventListener('wheel', handleWheel, true)
   }, [canvasRef, commitWheelZoom, getHistorySnapshot, panel.id, panel.imageScale, panel.imageOffsetX, panel.imageOffsetY, updatePanelLive])
 
-  // Mouse events, not Pointer Events — matches DraggableBubble below,
-  // which is the proven-working drag pattern elsewhere in this file.
-  const handleMouseDown = (e) => {
-    logEvent('modal:layer-mousedown-fired', { panelId: panel.id, button: e.button, x: e.clientX, y: e.clientY, target: describeTarget(e.target) })
+  // Pointer Events (not plain mouse events) so this works with touch drags
+  // too. This layer previously used mouse events; that wasn't what caused
+  // the pan/zoom bug (a ResizeObserver timing issue in PanelImage, fixed
+  // separately) — the real hazard is that sibling buttons (zoom controls)
+  // must stop propagation of pointerdown too, not just mousedown, or their
+  // taps would also start a drag here. See the guards in
+  // PanelImageZoomControls below.
+  const handlePointerDown = (e) => {
+    logEvent('modal:layer-pointerdown-fired', { panelId: panel.id, button: e.button, x: e.clientX, y: e.clientY, target: describeTarget(e.target) })
     if (e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
@@ -421,11 +436,11 @@ function PanelImageInteractionLayer({ panel, canvasRef, onClickPoint }) {
 
     const rect = canvasRef.current?.getBoundingClientRect()
     if (!rect) {
-      logEvent('modal:layer-mousedown-abort-no-rect', { panelId: panel.id })
+      logEvent('modal:layer-pointerdown-abort-no-rect', { panelId: panel.id })
       return
     }
     const imgEl = canvasRef.current?.querySelector('img')
-    logEvent('modal:layer-mousedown-start', {
+    logEvent('modal:layer-pointerdown-start', {
       panelId: panel.id, rect: { w: rect.width, h: rect.height },
       imgFound: Boolean(imgEl), natural: imgEl ? { w: imgEl.naturalWidth, h: imgEl.naturalHeight } : null,
     })
@@ -444,7 +459,7 @@ function PanelImageInteractionLayer({ panel, canvasRef, onClickPoint }) {
       historySnapshot: getHistorySnapshot(),
     }
 
-    const onMouseMove = (ev) => {
+    const onPointerMove = (ev) => {
       if (!dragRef.current) return
       const dx = ev.clientX - dragRef.current.startX
       const dy = ev.clientY - dragRef.current.startY
@@ -469,27 +484,29 @@ function PanelImageInteractionLayer({ panel, canvasRef, onClickPoint }) {
       })
     }
 
-    const onMouseUp = (ev) => {
+    const onPointerUp = (ev) => {
       const drag = dragRef.current
-      logEvent('modal:layer-mouseup', { panelId: panel.id, moved: drag?.moved ?? false })
+      logEvent('modal:layer-pointerup', { panelId: panel.id, moved: drag?.moved ?? false })
       if (drag?.moved) commitHistorySnapshot(drag.historySnapshot)
       else onClickPoint(ev.clientX, ev.clientY)
       dragRef.current = null
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('pointermove', onPointerMove)
+      document.removeEventListener('pointerup', onPointerUp)
+      document.removeEventListener('pointercancel', onPointerUp)
     }
 
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('pointermove', onPointerMove)
+    document.addEventListener('pointerup', onPointerUp)
+    document.addEventListener('pointercancel', onPointerUp)
   }
 
   return (
     <div
       ref={layerRef}
-      className="absolute inset-0"
+      className="absolute inset-0 touch-none"
       style={{ zIndex: 1, cursor: 'grab' }}
       title="Drag to reframe - Wheel to zoom - Click to place bubble"
-      onMouseDown={handleMouseDown}
+      onPointerDown={handlePointerDown}
     />
   )
 }
@@ -531,6 +548,7 @@ function PanelImageZoomControls({ panel, canvasRef }) {
       className="absolute bottom-1.5 right-1.5 flex items-center gap-0.5 rounded-md bg-black/60 px-1 py-1"
       style={{ zIndex: 6 }}
       onMouseDown={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}
     >
       <button
         type="button"
@@ -1103,14 +1121,14 @@ export default function PanelEditModal() {
     >
       <div
         className="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-        style={{ width: '92vw', maxWidth: 1160, height: '90vh' }}
+        style={{ width: '96vw', maxWidth: 1160, height: '94vh' }}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0">
           <div>
             <h2 className="text-sm font-semibold text-white">
               Panel {panelIdx + 1} - {page.title}
             </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="text-xs text-gray-500 mt-0.5 hidden sm:block">
               Click the canvas to place a bubble. Drag bubbles to reposition.
             </p>
           </div>
@@ -1122,8 +1140,8 @@ export default function PanelEditModal() {
           </button>
         </div>
 
-        <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 bg-gray-800 flex items-center justify-center overflow-auto p-6">
+        <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 bg-gray-800 flex items-center justify-center overflow-auto p-3 sm:p-6">
             <div
               ref={canvasRef}
               data-panel-canvas
@@ -1131,6 +1149,8 @@ export default function PanelEditModal() {
               style={{
                 width: previewSize.width,
                 height: previewSize.height,
+                maxWidth: '100%',
+                maxHeight: '100%',
                 background: hasPanelImage ? '#000' : '#f8f8f8',
                 border: '3px solid #1f2937',
                 cursor: 'crosshair',
@@ -1198,7 +1218,7 @@ export default function PanelEditModal() {
             </div>
           </div>
 
-          <div className="w-80 shrink-0 border-l border-gray-700 flex flex-col bg-gray-900">
+          <div className="w-full md:w-80 h-[45vh] md:h-auto shrink-0 border-t md:border-t-0 md:border-l border-gray-700 flex flex-col bg-gray-900 overflow-hidden">
             <div className="p-3 border-b border-gray-700 space-y-2 shrink-0">
               <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider block">
                 Panel Prompt

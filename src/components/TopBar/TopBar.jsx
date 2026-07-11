@@ -333,7 +333,10 @@ export default function TopBar() {
         }}
       />
 
-      <div className="flex items-center h-10 bg-gray-900 border-b border-gray-700 px-3 gap-1 shrink-0 select-none z-40">
+      <div
+        className="flex items-center h-10 bg-gray-900 border-b border-gray-700 px-3 gap-1 shrink-0 select-none z-40 overflow-x-auto overflow-y-hidden flex-nowrap"
+        style={{ WebkitOverflowScrolling: 'touch' }}
+      >
         {/* Brand + editable title */}
         <div className="flex items-center gap-2 pr-4 mr-1 border-r border-gray-700 shrink-0">
         <span className="text-lg leading-none">🎨</span>
@@ -360,12 +363,12 @@ export default function TopBar() {
       </div>
 
       {/* Menu dropdowns */}
-      <Dropdown label="File" items={FILE_MENU} onAction={handleAction} />
-      <Dropdown label="Edit" items={EDIT_MENU} onAction={handleAction} />
-      <Dropdown label="View" items={VIEW_MENU} onAction={handleAction} />
+      <div className="shrink-0"><Dropdown label="File" items={FILE_MENU} onAction={handleAction} /></div>
+      <div className="shrink-0"><Dropdown label="Edit" items={EDIT_MENU} onAction={handleAction} /></div>
+      <div className="shrink-0"><Dropdown label="View" items={VIEW_MENU} onAction={handleAction} /></div>
 
       <button
-        className="px-2.5 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-gray-300"
+        className="shrink-0 px-2.5 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-gray-300"
         onClick={() => handleAction('undo')}
         disabled={!canUndo}
         title="Undo"
@@ -373,7 +376,7 @@ export default function TopBar() {
         Undo
       </button>
       <button
-        className="px-2.5 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-gray-300"
+        className="shrink-0 px-2.5 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-gray-300"
         onClick={() => handleAction('redo')}
         disabled={!canRedo}
         title="Redo"
@@ -382,14 +385,14 @@ export default function TopBar() {
       </button>
 
       <button
-        className="px-3 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors"
+        className="shrink-0 px-3 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors"
         onClick={() => handleAction('quick-save')}
         title={projectFileHandleRef.current ? `Overwrite ${projectFileName || 'current JSON project'}` : 'Save JSON project'}
       >
         Save
       </button>
       <button
-        className="px-3 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors"
+        className="shrink-0 px-3 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors"
         onClick={() => handleAction('quick-load')}
         title="Load JSON project"
       >
@@ -398,26 +401,26 @@ export default function TopBar() {
 
       {/* Quick-access buttons */}
       <button
-        className="px-3 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors"
+        className="shrink-0 px-3 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors"
         onClick={openStylePanel}
       >
         Style
       </button>
       <button
-        className="px-3 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors"
+        className="shrink-0 px-3 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors"
         onClick={openCharactersPanel}
       >
         Characters
       </button>
       <button
-        className="px-3 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors"
+        className="shrink-0 px-3 h-8 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded transition-colors"
         onClick={openAssetsPanel}
       >
         Assets
       </button>
 
       <button
-        className={`flex items-center gap-1.5 px-3 h-8 text-sm rounded transition-colors ${
+        className={`shrink-0 flex items-center gap-1.5 px-3 h-8 text-sm rounded transition-colors whitespace-nowrap ${
           autoSaveImages
             ? 'bg-green-900/50 text-green-300 hover:bg-green-900/70'
             : 'text-gray-300 hover:bg-gray-700 hover:text-white'
@@ -430,12 +433,12 @@ export default function TopBar() {
         💾 Auto-Save {autoSaveImages ? 'On' : 'Off'}
       </button>
 
-      {/* Spacer */}
-      <div className="flex-1" />
+      {/* Spacer — collapses once the bar overflows and scrolls */}
+      <div className="flex-1 min-w-[8px]" />
 
       {/* AI Fill — Phase 6 */}
       <button
-        className="flex items-center gap-1.5 px-4 h-7 text-sm font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-md transition-colors"
+        className="shrink-0 flex items-center gap-1.5 px-4 h-7 text-sm font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-md transition-colors whitespace-nowrap"
         onClick={openAIFillModal}
       >
         ✨ AI Fill

@@ -252,12 +252,12 @@ export default function CharacterStudioModal() {
     >
       <div
         className="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-        style={{ width: '92vw', maxWidth: 1160, height: '90vh' }}
+        style={{ width: '96vw', maxWidth: 1160, height: '94vh' }}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0">
           <div>
             <h2 className="text-sm font-semibold text-white">Character Studio</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Manage your cast and their saved looks/presets.</p>
+            <p className="text-xs text-gray-500 mt-0.5 hidden sm:block">Manage your cast and their saved looks/presets.</p>
           </div>
           <button
             className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-700 hover:text-white text-xl transition-colors"
@@ -267,9 +267,9 @@ export default function CharacterStudioModal() {
           </button>
         </div>
 
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
           {/* ── Left: character roster ── */}
-          <div className="w-56 shrink-0 border-r border-gray-700 flex flex-col bg-gray-950/40">
+          <div className="w-full md:w-56 h-40 md:h-auto shrink-0 border-b md:border-b-0 md:border-r border-gray-700 flex flex-col bg-gray-950/40 overflow-hidden">
             <div className="p-3 border-b border-gray-700 flex items-center justify-between shrink-0">
               <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Characters</span>
               <button
@@ -309,7 +309,7 @@ export default function CharacterStudioModal() {
           </div>
 
           {/* ── Right: character detail + looks ── */}
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             {character ? (
               <>
                 <div className="p-4 border-b border-gray-700 shrink-0 space-y-2">
@@ -362,7 +362,7 @@ export default function CharacterStudioModal() {
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     {/* Always-present base reference portrait */}
                     <GeneratableImageCard
                       imageUrl={character.imageUrl}

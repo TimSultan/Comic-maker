@@ -1407,9 +1407,10 @@ const TABS = [
 export default function PropertiesPanel() {
   const rightSidebarTab = useComicStore(s => s.rightSidebarTab)
   const setRightSidebarTab = useComicStore(s => s.setRightSidebarTab)
+  const toggleRightSidebar = useComicStore(s => s.toggleRightSidebar)
 
   return (
-    <div className="w-72 shrink-0 flex flex-col bg-gray-900 border-l border-gray-700">
+    <div className="absolute inset-0 z-30 md:static md:z-auto w-full md:w-72 shrink-0 flex flex-col bg-gray-900 border-l border-gray-700">
       {/* Tab bar */}
       <div className="flex shrink-0 border-b border-gray-700">
         {TABS.map(tab => (
@@ -1425,6 +1426,13 @@ export default function PropertiesPanel() {
             {tab.label}
           </button>
         ))}
+        <button
+          className="md:hidden shrink-0 w-9 flex items-center justify-center text-gray-500 hover:text-gray-300 transition-colors"
+          onClick={toggleRightSidebar}
+          title="Close"
+        >
+          ✕
+        </button>
       </div>
 
       {/* Tab content */}

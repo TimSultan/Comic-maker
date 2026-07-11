@@ -88,20 +88,29 @@ function PageThumb({ page, isSelected, onClick, onDelete, canDelete }) {
 export default function PageNavigator() {
   const pages = useComicStore(s => s.pages)
   const selectedPageId = useComicStore(s => s.selectedPageId)
-  const { selectPage, addPage, removePage, duplicatePage } = useComicStore()
+  const { selectPage, addPage, removePage, duplicatePage, toggleLeftSidebar } = useComicStore()
 
   return (
-    <div className="w-44 shrink-0 flex flex-col bg-gray-900 border-r border-gray-700">
+    <div className="absolute inset-0 z-30 md:static md:z-auto w-full md:w-44 md:shrink-0 flex flex-col bg-gray-900 border-r border-gray-700">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700 shrink-0">
         <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pages</span>
-        <button
-          className="w-6 h-6 flex items-center justify-center rounded bg-purple-700 hover:bg-purple-600 text-white text-base font-bold leading-none transition-colors"
-          onClick={addPage}
-          title="Add page"
-        >
-          +
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            className="w-6 h-6 flex items-center justify-center rounded bg-purple-700 hover:bg-purple-600 text-white text-base font-bold leading-none transition-colors"
+            onClick={addPage}
+            title="Add page"
+          >
+            +
+          </button>
+          <button
+            className="md:hidden w-6 h-6 flex items-center justify-center rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm leading-none transition-colors"
+            onClick={toggleLeftSidebar}
+            title="Close"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {/* Page list */}

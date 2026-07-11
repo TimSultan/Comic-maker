@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import TopBar from './components/TopBar/TopBar'
 import PageNavigator from './components/LeftSidebar/PageNavigator'
 import ComicCanvas from './components/Canvas/ComicCanvas'
@@ -13,10 +13,20 @@ export default function App() {
   const showLeftSidebar = useComicStore(s => s.showLeftSidebar)
   const showRightSidebar = useComicStore(s => s.showRightSidebar)
 
+  // On phone-sized viewports, start with both drawers closed so the canvas
+  // is visible immediately — they're full-screen overlays there (see
+  // PageNavigator/PropertiesPanel), so showing both by default would just
+  // hide the comic behind them. Desktop keeps its normal side-by-side default.
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 767px)').matches) {
+      useComicStore.setState({ showLeftSidebar: false, showRightSidebar: false })
+    }
+  }, [])
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+    <div className="app-shell flex flex-col overflow-hidden">
       <TopBar />
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div className="flex flex-1 overflow-hidden relative">
         {showLeftSidebar && <PageNavigator />}
         <ComicCanvas />
         {showRightSidebar && <PropertiesPanel />}

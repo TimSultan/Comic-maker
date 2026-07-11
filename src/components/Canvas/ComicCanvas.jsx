@@ -26,9 +26,10 @@ function CanvasBubble({ bubble, panelRef, onDragUpdate, onOpenModal }) {
   const getHistorySnapshot = useComicStore(s => s.getHistorySnapshot)
   const commitHistorySnapshot = useComicStore(s => s.commitHistorySnapshot)
 
-          const handleMouseDown = (e) => {
+          const handlePointerDown = (e) => {
     e.stopPropagation()
     if (e.button !== 0) return
+    e.preventDefault()
 
     const panelEl   = panelRef.current
     const panelRect = panelEl.getBoundingClientRect()
@@ -45,7 +46,7 @@ function CanvasBubble({ bubble, panelRef, onDragUpdate, onOpenModal }) {
       historySnapshot: getHistorySnapshot(),
     }
 
-    const onMouseMove = (ev) => {
+    const onPointerMove = (ev) => {
       if (!dragState.current) return
       if (Math.abs(ev.clientX - e.clientX) > 4 || Math.abs(ev.clientY - e.clientY) > 4)
         dragState.current.moved = true
@@ -57,20 +58,23 @@ function CanvasBubble({ bubble, panelRef, onDragUpdate, onOpenModal }) {
       })
     }
 
-    const onMouseUp = () => {
+    const onPointerUp = () => {
       if (!dragState.current?.moved) onOpenModal(bubble.id)
       else commitHistorySnapshot(dragState.current.historySnapshot)
       dragState.current = null
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('pointermove', onPointerMove)
+      document.removeEventListener('pointerup', onPointerUp)
+      document.removeEventListener('pointercancel', onPointerUp)
     }
 
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('pointermove', onPointerMove)
+    document.addEventListener('pointerup', onPointerUp)
+    document.addEventListener('pointercancel', onPointerUp)
   }
 
   return (
     <div
+      className="touch-none"
       style={{
         position: 'absolute',
         left:   `${bubble.x}%`,
@@ -82,7 +86,7 @@ function CanvasBubble({ bubble, panelRef, onDragUpdate, onOpenModal }) {
         pointerEvents: 'auto',
       }}
       title="Drag to move · Click to edit"
-      onMouseDown={handleMouseDown}
+      onPointerDown={handlePointerDown}
     >
       <BubbleShape bubble={bubble} />
     </div>
@@ -194,10 +198,15 @@ function PanelImageInteractionLayer({ panel, panelRef, onSelect }) {
     return () => el.removeEventListener('wheel', handleWheel)
   }, [commitWheelZoom, getHistorySnapshot, onSelect, panel.id, panel.imageScale, panel.imageOffsetX, panel.imageOffsetY, updatePanelLive])
 
-  // Mouse events, not Pointer Events — matches CanvasBubble/ResizeHandle below,
-  // which are the proven-working drag pattern elsewhere in this file.
-  const handleMouseDown = (e) => {
-    logEvent('canvas:layer-mousedown-fired', { panelId: panel.id, button: e.button, x: e.clientX, y: e.clientY, target: describeTarget(e.target) })
+  // Pointer Events (not plain mouse events) so a single handler covers
+  // mouse AND touch drags. This layer previously used mouse events; that
+  // wasn't what caused the pan/zoom bug (a ResizeObserver timing issue in
+  // PanelImage, fixed separately) — the real hazard is that sibling
+  // buttons (zoom controls, replace-image) must stop propagation of
+  // pointerdown too, not just mousedown, or their taps would also start a
+  // drag here. See the onPointerDown={e => e.stopPropagation()} guards below.
+  const handlePointerDown = (e) => {
+    logEvent('canvas:layer-pointerdown-fired', { panelId: panel.id, button: e.button, x: e.clientX, y: e.clientY, target: describeTarget(e.target) })
     if (e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
@@ -206,11 +215,11 @@ function PanelImageInteractionLayer({ panel, panelRef, onSelect }) {
 
     const rect = panelRef.current?.getBoundingClientRect()
     if (!rect) {
-      logEvent('canvas:layer-mousedown-abort-no-rect', { panelId: panel.id })
+      logEvent('canvas:layer-pointerdown-abort-no-rect', { panelId: panel.id })
       return
     }
     const imgEl = panelRef.current?.querySelector('img')
-    logEvent('canvas:layer-mousedown-start', {
+    logEvent('canvas:layer-pointerdown-start', {
       panelId: panel.id, rect: { w: rect.width, h: rect.height },
       imgFound: Boolean(imgEl), natural: imgEl ? { w: imgEl.naturalWidth, h: imgEl.naturalHeight } : null,
     })
@@ -229,7 +238,7 @@ function PanelImageInteractionLayer({ panel, panelRef, onSelect }) {
       historySnapshot: getHistorySnapshot(),
     }
 
-    const onMouseMove = (ev) => {
+    const onPointerMove = (ev) => {
       if (!dragRef.current) return
       const dx = ev.clientX - dragRef.current.startX
       const dy = ev.clientY - dragRef.current.startY
@@ -254,27 +263,29 @@ function PanelImageInteractionLayer({ panel, panelRef, onSelect }) {
       })
     }
 
-    const onMouseUp = () => {
+    const onPointerUp = () => {
       const drag = dragRef.current
-      logEvent('canvas:layer-mouseup', { panelId: panel.id, moved: drag?.moved ?? false })
+      logEvent('canvas:layer-pointerup', { panelId: panel.id, moved: drag?.moved ?? false })
       if (drag?.moved) commitHistorySnapshot(drag.historySnapshot)
       dragRef.current = null
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('pointermove', onPointerMove)
+      document.removeEventListener('pointerup', onPointerUp)
+      document.removeEventListener('pointercancel', onPointerUp)
     }
 
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('pointermove', onPointerMove)
+    document.addEventListener('pointerup', onPointerUp)
+    document.addEventListener('pointercancel', onPointerUp)
   }
 
   return (
     <div
       ref={layerRef}
       data-no-export
-      className="absolute inset-0"
+      className="absolute inset-0 touch-none"
       style={{ zIndex: 1, cursor: 'grab' }}
       title="Drag to reframe - Scroll to zoom"
-      onMouseDown={handleMouseDown}
+      onPointerDown={handlePointerDown}
     />
   )
 }
@@ -330,6 +341,7 @@ function PanelZoomControls({ panel, panelRef, onSelect }) {
       className="absolute bottom-1.5 right-1.5 flex items-center gap-0.5 rounded-md bg-black/60 px-1 py-1"
       style={{ zIndex: 4 }}
       onMouseDown={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}
     >
       <button
         type="button"
@@ -365,7 +377,7 @@ function ResizeHandle({ direction, position, idx, sizes, pageId, pageRef }) {
   const commitHistorySnapshot = useComicStore(s => s.commitHistorySnapshot)
   const isCol = direction === 'col'
 
-  const handleMouseDown = (e) => {
+  const handlePointerDown = (e) => {
     e.preventDefault()
     e.stopPropagation()
     const rect       = pageRef.current.getBoundingClientRect()
@@ -387,23 +399,25 @@ function ResizeHandle({ direction, position, idx, sizes, pageId, pageRef }) {
     }
     const onUp = () => {
       commitHistorySnapshot(historySnapshot)
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+      document.removeEventListener('pointercancel', onUp)
     }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+    document.addEventListener('pointercancel', onUp)
   }
 
   return (
     <div
       data-no-export
-      className={`absolute z-20 group ${isCol ? 'cursor-col-resize' : 'cursor-row-resize'}`}
+      className={`absolute z-20 group touch-none ${isCol ? 'cursor-col-resize' : 'cursor-row-resize'}`}
       style={
         isCol
           ? { left: `${position}%`, top: 0, bottom: 0, width: 14, transform: 'translateX(-50%)' }
           : { top: `${position}%`, left: 0, right: 0, height: 14, transform: 'translateY(-50%)' }
       }
-      onMouseDown={handleMouseDown}
+      onPointerDown={handlePointerDown}
     >
       <div className={`bg-purple-400 opacity-0 group-hover:opacity-90 transition-opacity duration-100
         ${isCol ? 'w-0.5 h-full mx-auto' : 'h-0.5 w-full my-auto'}`}
@@ -567,6 +581,7 @@ function ComicPanel({ panel, idx, placement, isSelected, onSelect, onBubbleClick
           bg-black/60 text-white text-xs hover:bg-black/80 transition-colors"
         style={{ zIndex: 4 }}
         onMouseDown={e => e.stopPropagation()}
+        onPointerDown={e => e.stopPropagation()}
         onClick={e => { e.stopPropagation(); onSelect(panel.id); fileInputRef.current?.click() }}
       >
         📁

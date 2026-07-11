@@ -23,6 +23,37 @@ body {
   color: #e5e7eb;
 }
 
+/* Full-height app shell that accounts for iOS Safari's collapsing address
+   bar — 100vh is the largest possible viewport there, so a fixed 100vh
+   shell gets clipped behind the toolbar until dvh is supported. */
+.app-shell {
+  height: 100vh;
+}
+@supports (height: 100dvh) {
+  .app-shell {
+    height: 100dvh;
+  }
+}
+
+/* iOS Safari auto-zooms the page when focusing a text input smaller than
+   16px. Below the mobile breakpoint, force every field up to that floor. */
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Hover-reveal affordances (delete buttons, resize grips, etc.) rely on
+   :hover, which touch devices never trigger — always show them there. */
+@media (hover: none) {
+  .group-hover\:opacity-100,
+  .group-hover\:opacity-90 {
+    opacity: 1 !important;
+  }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 5px;
