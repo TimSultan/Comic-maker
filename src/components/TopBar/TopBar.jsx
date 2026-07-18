@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import useComicStore from '../../store/useComicStore'
 import { exportPageAsPng } from '../../utils/exportPagePng'
 import { exportComicAsPdf } from '../../utils/exportComicPdf'
-import { migrateProjectImagesToAssets } from '../../utils/imageStore'
+import { getImageAsset, migrateProjectImagesToAssets } from '../../utils/imageStore'
 
 // ─── Menu data ───────────────────────────────────────────────────
 
@@ -145,7 +145,7 @@ export default function TopBar() {
   const projectFileHandleRef = useRef(null)
   const pdfExportingRef = useRef(false)
 
-  const getProjectData = useCallback(() => {
+  const getProjectData = useCallback(async ({ includeAssets = false } = {}) => {
     const {
       comicTitle,
       globalStyle,
@@ -156,8 +156,8 @@ export default function TopBar() {
       imageModel,
       imageQuality,
     } = useComicStore.getState()
-    return {
-      schemaVersion: 2,
+    const data = {
+      schemaVersion: includeAssets ? 3 : 2,
       comicTitle,
       globalStyle,
       pages,
@@ -168,6 +168,33 @@ export default function TopBar() {
       imageQuality,
       savedAt: new Date().toISOString(),
     }
+    if (!includeAssets) return data
+
+    // Portable saves (quick-save / export-json) embed every referenced
+    // IndexedDB asset as a full-quality data URL so the file is self
+    // contained — the browser-storage "save" path stays asset-free since
+    // that project already lives alongside the same IndexedDB.
+    const assetIds = new Set()
+    pages.forEach(page => page.panels.forEach(panel => { if (panel.imageAssetId) assetIds.add(panel.imageAssetId) }))
+    characters.forEach(character => {
+      if (character.imageAssetId) assetIds.add(character.imageAssetId)
+      ;(character.images || []).forEach(img => { if (img.assetId) assetIds.add(img.assetId) })
+      ;(character.looks || []).forEach(look => { if (look.imageAssetId) assetIds.add(look.imageAssetId) })
+    })
+    styleReferences.forEach(ref => { if (ref.assetId) assetIds.add(ref.assetId) })
+    projectImages.forEach(image => { if (image.imageAssetId) assetIds.add(image.imageAssetId) })
+
+    const assets = {}
+    await Promise.all([...assetIds].map(async id => {
+      try {
+        const dataUrl = await getImageAsset(id)
+        if (dataUrl) assets[id] = dataUrl
+      } catch {
+        // Skip ids that fail to resolve — the project still loads without them.
+      }
+    }))
+
+    return { ...data, assets }
   }, [])
 
   const applyProjectData = useCallback(async (data) => {
@@ -240,14 +267,18 @@ export default function TopBar() {
         }
         break
       case 'save': {
-        const data = getProjectData()
-        localStorage.setItem('comic-maker-save', JSON.stringify(data))
-        // Brief toast would go here — using console for now
-        console.info('Comic saved to localStorage')
+        const data = await getProjectData({ includeAssets: false })
+        try {
+          localStorage.setItem('comic-maker-save', JSON.stringify(data))
+          // Brief toast would go here — using console for now
+          console.info('Comic saved to localStorage')
+        } catch {
+          alert('Failed to save to browser storage — it may be full. Try Export JSON for a full backup instead.')
+        }
         break
       }
       case 'quick-save': {
-        const data = getProjectData()
+        const data = await getProjectData({ includeAssets: true })
         try {
           if (projectFileHandleRef.current?.createWritable) {
             await writeProjectFile(projectFileHandleRef.current, data)
@@ -314,7 +345,7 @@ export default function TopBar() {
         break
       }
       case 'export-json': {
-        downloadProjectJson(getProjectData())
+        downloadProjectJson(await getProjectData({ includeAssets: true }))
         break
       }
       case 'export-png': {

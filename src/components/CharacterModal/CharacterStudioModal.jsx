@@ -3,7 +3,7 @@ import useComicStore from '../../store/useComicStore'
 import StoredImage from '../StoredImage'
 import { collectProjectImages, ReferenceImagePicker } from '../RightSidebar/PropertiesPanel'
 import { generatePanelImage, getDefaultLookPrompt, getDefaultCharacterPortraitPrompt } from '../../utils/imageGen'
-import { resolveImageUrl } from '../../utils/imageStore'
+import { putImageAsset, resolveImageUrl } from '../../utils/imageStore'
 import { downloadDataUrlImage } from '../../utils/downloadImage'
 import { MAX_REFERENCE_IMAGES } from '../../utils/defaults'
 
@@ -16,6 +16,7 @@ import { MAX_REFERENCE_IMAGES } from '../../utils/defaults'
 
 function GeneratableImageCard({
   imageUrl,
+  imageAssetId = null,
   prompt,
   defaultPrompt,
   referenceImageIds = [],
@@ -35,6 +36,7 @@ function GeneratableImageCard({
   const [error, setError] = useState('')
   const [pickerOpen, setPickerOpen] = useState(false)
 
+  const hasImage = Boolean(imageUrl || imageAssetId)
   const referenceImages = assetImages.filter(img => referenceImageIds.includes(img.id))
 
   const toggleReference = (imageId) => {
@@ -46,13 +48,12 @@ function GeneratableImageCard({
     onUpdate({ referenceImageIds: [...referenceImageIds, imageId] })
   }
 
-  const handleUpload = (e) => {
+  const handleUpload = async (e) => {
     const file = e.target.files[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => onUpdate({ imageUrl: ev.target.result })
-    reader.readAsDataURL(file)
     e.target.value = ''
+    const imageAssetId = await putImageAsset({ blob: file, source: 'character', label: filenameSlug })
+    onUpdate({ imageUrl: null, imageAssetId })
   }
 
   const handleGenerate = async () => {
@@ -66,12 +67,16 @@ function GeneratableImageCard({
         name: `${img.source} reference: ${img.label}`,
         type: 'selected',
       })))).filter(ref => ref.url)
+      const resolvedCharacters = await Promise.all(extraCharacters.map(async c => ({
+        ...c,
+        imageUrl: await resolveImageUrl(c.imageUrl, c.imageAssetId),
+      })))
 
       const finalPrompt = prompt?.trim() || defaultPrompt
       const { imageUrl: generatedUrl } = await generatePanelImage({
         prompt: finalPrompt,
         globalStyle,
-        characters: extraCharacters,
+        characters: resolvedCharacters,
         imageReferences: resolvedRefs,
         apiKey,
         geminiApiKey,
@@ -79,7 +84,8 @@ function GeneratableImageCard({
         quality: imageQuality,
         size: '3:4',
       })
-      onUpdate({ imageUrl: generatedUrl })
+      const imageAssetId = await putImageAsset({ dataUrl: generatedUrl, source: 'character', label: filenameSlug })
+      onUpdate({ imageUrl: null, imageAssetId })
       if (useComicStore.getState().autoSaveImages) {
         downloadDataUrlImage(generatedUrl, `${filenameSlug}-${Date.now()}.png`)
       }
@@ -93,13 +99,15 @@ function GeneratableImageCard({
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden flex flex-col">
       <div className={`relative group bg-gray-950 flex items-center justify-center ${imageHeightClass}`}>
-        {imageUrl ? (
+        {hasImage ? (
           <>
-            <img src={imageUrl} alt="" className="max-w-full max-h-full object-contain" />
+            <StoredImage src={imageUrl} assetId={imageAssetId} alt="" className="max-w-full max-h-full object-contain" />
             <button
               className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center bg-red-700/80
                 hover:bg-red-600 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity"
-              onClick={() => onUpdate({ imageUrl: null })}
+              // Only clears the reference — never deletes the IndexedDB asset, so
+              // undo can bring this exact imageAssetId back (same policy as panels).
+              onClick={() => onUpdate({ imageUrl: null, imageAssetId: null })}
               title="Clear image"
             >
               ×
@@ -177,14 +185,14 @@ function GeneratableImageCard({
           className={`w-full py-1.5 text-xs font-semibold rounded-lg transition-colors mt-auto ${
             generating
               ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-              : imageUrl
+              : hasImage
               ? 'bg-indigo-700 hover:bg-indigo-600 text-white'
               : 'bg-green-700 hover:bg-green-600 text-white'
           }`}
           onClick={handleGenerate}
           disabled={generating}
         >
-          {generating ? '⏳ Generating…' : imageUrl ? '✏️ Regenerate' : '🎨 Generate'}
+          {generating ? '⏳ Generating…' : hasImage ? '✏️ Regenerate' : '🎨 Generate'}
         </button>
 
         {error && <p className="text-xs text-red-400 leading-relaxed">{error}</p>}
@@ -293,8 +301,8 @@ export default function CharacterStudioModal() {
                     }`}
                     onClick={() => setCharacterManagerCharacterId(c.id)}
                   >
-                    {c.imageUrl ? (
-                      <img src={c.imageUrl} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+                    {c.imageUrl || c.imageAssetId ? (
+                      <StoredImage src={c.imageUrl} assetId={c.imageAssetId} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
                     ) : (
                       <span className="w-7 h-7 rounded-full shrink-0 inline-block" style={{ background: c.color ?? '#8b5cf6' }} />
                     )}
@@ -366,6 +374,7 @@ export default function CharacterStudioModal() {
                     {/* Always-present base reference portrait */}
                     <GeneratableImageCard
                       imageUrl={character.imageUrl}
+                      imageAssetId={character.imageAssetId}
                       prompt={character.prompt}
                       defaultPrompt={getDefaultCharacterPortraitPrompt(character)}
                       referenceImageIds={character.referenceImageIds ?? []}
@@ -383,6 +392,7 @@ export default function CharacterStudioModal() {
                       <GeneratableImageCard
                         key={look.id}
                         imageUrl={look.imageUrl}
+                        imageAssetId={look.imageAssetId}
                         prompt={look.prompt}
                         defaultPrompt={getDefaultLookPrompt(globalStyle)}
                         referenceImageIds={look.referenceImageIds ?? []}

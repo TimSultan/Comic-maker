@@ -211,25 +211,27 @@ export function collectProjectImages({ pages, characters, styleReferences, proje
     // current main one) is a valid reference candidate elsewhere in the app.
     const galleryImages = char.images && char.images.length > 0
       ? char.images
-      : (char.imageUrl ? [{ id: 'legacy-main', imageUrl: char.imageUrl }] : [])
+      : (char.imageUrl || char.imageAssetId ? [{ id: 'legacy-main', imageUrl: char.imageUrl, assetId: char.imageAssetId }] : [])
     const mainId = char.mainImageId ?? galleryImages[0]?.id
     galleryImages.forEach(img => {
-      if (!img.imageUrl) return
+      if (!img.imageUrl && !img.assetId) return
       const isMain = img.id === mainId
       images.push({
         // Keep the main image's id stable as `character:<id>` for backward
         // compatibility with projects saved before the gallery existed.
         id: isMain ? `character:${char.id}` : `characterImage:${char.id}:${img.id}`,
         url: img.imageUrl,
+        assetId: img.assetId,
         label: isMain ? (char.name || 'Character') : `${char.name || 'Character'} (alt)`,
         source: 'Character',
       })
     })
     ;(char.looks || []).forEach(look => {
-      if (look.imageUrl) {
+      if (look.imageUrl || look.imageAssetId) {
         images.push({
           id: `characterLook:${char.id}:${look.id}`,
           url: look.imageUrl,
+          assetId: look.imageAssetId,
           label: `${char.name || 'Character'} - ${look.name || 'Look'}`,
           source: 'Character look',
         })
@@ -238,10 +240,11 @@ export function collectProjectImages({ pages, characters, styleReferences, proje
   })
 
   styleReferences.forEach(ref => {
-    if (ref.url) {
+    if (ref.url || ref.assetId) {
       images.push({
         id: `style:${ref.id}`,
         url: ref.url,
+        assetId: ref.assetId,
         label: ref.name || 'Style reference',
         source: 'Style',
       })
@@ -276,9 +279,14 @@ function resolveCharacterLook(character, panel) {
 function resolveCharacterForPanel(character, panel) {
   const look = resolveCharacterLook(character, panel)
   if (!look) return character
+  // A look "wins" only when it actually carries an image of its own —
+  // otherwise fall back to the character's pair (never mix look.imageUrl
+  // with character.imageAssetId or vice versa).
+  const hasLookImage = look.imageUrl || look.imageAssetId
   return {
     ...character,
-    imageUrl: look.imageUrl || character.imageUrl,
+    imageUrl: hasLookImage ? look.imageUrl : character.imageUrl,
+    imageAssetId: hasLookImage ? look.imageAssetId : character.imageAssetId,
     description: [character.description, look.name ? `Look: ${look.name}` : ''].filter(Boolean).join(' — '),
   }
 }
@@ -419,9 +427,12 @@ function PanelTab() {
       imageResolution: imageResolution ?? targetPanel.imageResolution,
     }
     const isEditingExistingImage = !freshGenerate && Boolean(targetPanel.imageUrl || targetPanel.imageAssetId)
-    const selectedChars = allCharacters
-      .filter(c => targetPanel.characters?.includes(c.id))
-      .map(c => resolveCharacterForPanel(c, targetPanel))
+    const selectedChars = await Promise.all(
+      allCharacters
+        .filter(c => targetPanel.characters?.includes(c.id))
+        .map(c => resolveCharacterForPanel(c, targetPanel))
+        .map(async c => ({ ...c, imageUrl: await resolveImageUrl(c.imageUrl, c.imageAssetId) })),
+    )
     const selectedPanelReferenceImages = assetImages.filter(image => (targetPanel.referenceImageIds ?? []).includes(image.id))
     const currentPanelImageUrl = await resolveImageUrl(targetPanel.imageUrl, targetPanel.imageAssetId)
     const currentImageReference = isEditingExistingImage && currentPanelImageUrl
@@ -683,8 +694,8 @@ function PanelTab() {
                       })
                     }}
                   >
-                    {char.imageUrl ? (
-                      <img src={char.imageUrl} alt="" className="w-4 h-4 rounded-full object-cover shrink-0" />
+                    {char.imageUrl || char.imageAssetId ? (
+                      <StoredImage src={char.imageUrl} assetId={char.imageAssetId} alt="" className="w-4 h-4 rounded-full object-cover shrink-0" />
                     ) : (
                       <span className="w-3 h-3 rounded-full shrink-0 inline-block" style={{ background: char.color ?? '#8b5cf6' }} />
                     )}
@@ -712,7 +723,10 @@ function PanelTab() {
         {/* Show summary of what gets sent to the image API */}
         {(panel.characters?.length ?? 0) > 0 && (() => {
           const selectedCharacters = allCharacters.filter(c => panel.characters?.includes(c.id))
-          const withRef = selectedCharacters.filter(c => resolveCharacterForPanel(c, panel).imageUrl).length
+          const withRef = selectedCharacters.filter(c => {
+            const r = resolveCharacterForPanel(c, panel)
+            return r.imageUrl || r.imageAssetId
+          }).length
           return (
             <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">
               {panel.characters.length} character{panel.characters.length !== 1 ? 's' : ''}
@@ -1066,7 +1080,10 @@ function StyleTab() {
           <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Style References</span>
           <ImageUploadButton
             label="+ Add"
-            onImage={url => addStyleReference({ url, name: 'Reference' })}
+            onImage={async dataUrl => {
+              const assetId = await putImageAsset({ dataUrl, source: 'style', label: 'Reference' })
+              addStyleReference({ url: null, assetId, name: 'Reference' })
+            }}
           />
         </div>
 
@@ -1078,7 +1095,7 @@ function StyleTab() {
           <div className="grid grid-cols-2 gap-1.5">
             {styleReferences.map(ref => (
               <div key={ref.id} className="relative group rounded-lg overflow-hidden border border-gray-700">
-                <img src={ref.url} alt={ref.name} className="w-full h-20 object-cover" />
+                <StoredImage src={ref.url} assetId={ref.assetId} alt={ref.name} className="w-full h-20 object-cover" />
                 <input
                   className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs px-1.5 py-0.5
                     border-0 outline-none placeholder-gray-400 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -1123,13 +1140,17 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
 
   // Every image ever uploaded or generated for this character is kept here
   // so past attempts aren't lost — one of them is picked as the active
-  // "main" reference (character.imageUrl, read everywhere else in the app).
+  // "main" reference (character.imageUrl/imageAssetId, read everywhere else
+  // in the app). A gallery entry matches the current main by either field —
+  // never mix an assetId from one with an imageUrl from another.
   const storedImages = char.images ?? []
-  const currentUrlTracked = char.imageUrl && storedImages.some(img => img.imageUrl === char.imageUrl)
-  const images = char.imageUrl && !currentUrlTracked
-    ? [...storedImages, { id: char.mainImageId || 'external-main', imageUrl: char.imageUrl }]
+  const isCurrentMain = (img) =>
+    Boolean((img.assetId && img.assetId === char.imageAssetId) || (img.imageUrl && img.imageUrl === char.imageUrl))
+  const currentTracked = storedImages.some(isCurrentMain)
+  const images = (char.imageUrl || char.imageAssetId) && !currentTracked
+    ? [...storedImages, { id: char.mainImageId || 'external-main', imageUrl: char.imageUrl, assetId: char.imageAssetId }]
     : storedImages
-  const mainId = char.mainImageId ?? images.find(img => img.imageUrl === char.imageUrl)?.id ?? images[0]?.id ?? null
+  const mainId = char.mainImageId ?? images.find(isCurrentMain)?.id ?? images[0]?.id ?? null
   const mainImage = images.find(img => img.id === mainId) ?? null
 
   const referenceIds = char.referenceImageIds ?? []
@@ -1145,22 +1166,32 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
   }
 
   const selectMain = (img) => {
-    onUpdate({ images, mainImageId: img.id, imageUrl: img.imageUrl })
+    onUpdate({ images, mainImageId: img.id, imageUrl: img.imageUrl ?? null, imageAssetId: img.assetId ?? null })
   }
 
   const deleteImage = (imgId) => {
+    // Only drops this gallery entry — never deletes the underlying
+    // IndexedDB asset, since undo can bring a character's imageAssetId
+    // back to a value that referenced it (same policy as panels).
     const nextImages = images.filter(img => img.id !== imgId)
     const nextMain = imgId === mainId ? nextImages[0] ?? null : images.find(img => img.id === mainId)
     onUpdate({
       images: nextImages,
       mainImageId: nextMain?.id ?? null,
       imageUrl: nextMain?.imageUrl ?? null,
+      imageAssetId: nextMain?.assetId ?? null,
     })
   }
 
-  const addImage = (imageUrl) => {
-    const newImg = { id: uid(), imageUrl }
-    onUpdate({ images: [...images, newImg], mainImageId: newImg.id, imageUrl: newImg.imageUrl })
+  // Shared tail of the upload/generate flows once a new asset id exists.
+  const addImageAsset = (assetId) => {
+    const newImg = { id: uid(), assetId }
+    onUpdate({ images: [...images, newImg], mainImageId: newImg.id, imageUrl: null, imageAssetId: assetId })
+  }
+
+  const addImage = async (dataUrl) => {
+    const assetId = await putImageAsset({ dataUrl, source: 'character', label: char.name })
+    addImageAsset(assetId)
   }
 
   const handleGeneratePortrait = async () => {
@@ -1185,7 +1216,7 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
         quality: imageQuality,
         size: '1:1',
       })
-      addImage(imageUrl)
+      await addImage(imageUrl)
       if (useComicStore.getState().autoSaveImages) {
         const slug = (char.name || 'character').replace(/\s+/g, '-').toLowerCase()
         downloadDataUrlImage(imageUrl, `${slug}-portrait-${Date.now()}.png`)
@@ -1206,7 +1237,7 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
           onClick={() => setExpanded(v => !v)}
           title={expanded ? 'Click to minimize' : 'Click to expand'}
         >
-          <img src={mainImage.imageUrl} alt={char.name} className="max-w-full max-h-full object-contain" />
+          <StoredImage src={mainImage.imageUrl} assetId={mainImage.assetId} alt={char.name} className="max-w-full max-h-full object-contain" />
           <button
             className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center bg-red-700/80
               hover:bg-red-600 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity"
@@ -1237,7 +1268,7 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
                 onClick={() => selectMain(img)}
                 title={img.id === mainId ? 'Main reference' : 'Set as main reference'}
               >
-                <img src={img.imageUrl} alt="" className="max-w-full max-h-full object-contain" />
+                <StoredImage src={img.imageUrl} assetId={img.assetId} alt="" className="max-w-full max-h-full object-contain" />
               </button>
               <button
                 className="absolute -top-0.5 -right-0.5 w-4 h-4 flex items-center justify-center bg-red-700/90
@@ -1260,13 +1291,12 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
             <span className="text-xs text-gray-500">📷 Upload</span>
             <input
               type="file" accept="image/*" className="hidden"
-              onChange={e => {
+              onChange={async e => {
                 const file = e.target.files[0]
                 if (!file) return
-                const reader = new FileReader()
-                reader.onload = ev => addImage(ev.target.result)
-                reader.readAsDataURL(file)
                 e.target.value = ''
+                const assetId = await putImageAsset({ blob: file, source: 'character', label: char.name })
+                addImageAsset(assetId)
               }}
             />
           </label>
@@ -1484,11 +1514,11 @@ function AssetsTab() {
   })
 
   const characterImages = characters
-    .filter(char => char.imageUrl)
-    .map(char => ({ id: char.id, url: char.imageUrl, label: char.name || 'Character', source: 'Character' }))
+    .filter(char => char.imageUrl || char.imageAssetId)
+    .map(char => ({ id: char.id, url: char.imageUrl, assetId: char.imageAssetId, label: char.name || 'Character', source: 'Character' }))
   const styleImages = styleReferences
-    .filter(ref => ref.url)
-    .map(ref => ({ id: ref.id, url: ref.url, label: ref.name || 'Style reference', source: 'Style' }))
+    .filter(ref => ref.url || ref.assetId)
+    .map(ref => ({ id: ref.id, url: ref.url, assetId: ref.assetId, label: ref.name || 'Style reference', source: 'Style' }))
 
   const handleUpload = (e) => {
     const files = [...(e.target.files || [])]

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { resolveImageUrl } from '../utils/imageStore'
+import { resolveDisplayUrl } from '../utils/imageStore'
 import { logEvent } from '../utils/debugLog'
 
 export default function PanelImage({ src, assetId = null, offsetX = 0, offsetY = 0, scale = 1, alt = '' }) {
@@ -42,7 +42,7 @@ export default function PanelImage({ src, assetId = null, offsetX = 0, offsetY =
     setNaturalSize({ width: 0, height: 0 })
     setResolvedSrc(src || null)
     let cancelled = false
-    resolveImageUrl(src, assetId)
+    resolveDisplayUrl(src, assetId, 'preview')
       .then(url => {
         if (!cancelled) setResolvedSrc(url)
       })
@@ -135,6 +135,7 @@ export default function PanelImage({ src, assetId = null, offsetX = 0, offsetY =
         ref={imgRef}
         key={resolvedSrc}
         src={resolvedSrc}
+        data-asset-id={assetId ?? undefined}
         alt={alt}
         draggable={false}
         style={imageStyle}

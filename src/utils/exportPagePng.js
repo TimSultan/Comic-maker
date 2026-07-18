@@ -1,4 +1,5 @@
 import html2canvas from 'html2canvas'
+import { getImageAsset } from './imageStore'
 
 function safeFileName(name) {
   return (name || 'comic-page')
@@ -67,6 +68,20 @@ export async function renderPageCanvas(pageElement, { hideBubbles = false } = {}
     }
   })
 
+  // The canvas normally only has each panel's compressed display preview
+  // loaded — PNG/PDF export needs full quality, so resolve every distinct
+  // asset id up front and swap the clone's <img> src for it below.
+  const assetImgs = [...pageElement.querySelectorAll('img[data-asset-id]')]
+  const originalByAssetId = new Map()
+  await Promise.all([...new Set(assetImgs.map(img => img.dataset.assetId))].map(async id => {
+    try {
+      const url = await getImageAsset(id)
+      if (url) originalByAssetId.set(id, url)
+    } catch {
+      // Resolution failed — the clone keeps the already-loaded preview.
+    }
+  }))
+
   const canvas = await html2canvas(pageElement, {
     backgroundColor: '#ffffff',
     scale: 2,
@@ -91,6 +106,16 @@ export async function renderPageCanvas(pageElement, { hideBubbles = false } = {}
         ? [...clonedPage.querySelectorAll('[data-comic-panel] img')]
         : []
       clonedImgs.forEach((cloneImg, i) => {
+        // Swap the compressed preview for the full-quality original — the
+        // layout box below is sized from the preview, but since it's
+        // object-fit 'fill' and the original shares its aspect ratio, this
+        // doesn't shift the layout. html2canvas loads clone images itself
+        // after onclone returns (imageTimeout above), so a src swap is safe.
+        const assetId = cloneImg.dataset.assetId
+        if (assetId && originalByAssetId.has(assetId)) {
+          cloneImg.src = originalByAssetId.get(assetId)
+        }
+
         const layout = imgLayouts[i]
         if (!layout) return
         Object.assign(cloneImg.style, {

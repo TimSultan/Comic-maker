@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react'
-import { resolveImageUrl } from '../utils/imageStore'
+import { resolveDisplayUrl } from '../utils/imageStore'
 
-export default function StoredImage({ src, assetId = null, alt = '', className = '', style, ...props }) {
+export default function StoredImage({ src, assetId = null, variant = 'preview', alt = '', className = '', style, ...props }) {
   const [resolvedSrc, setResolvedSrc] = useState(src || null)
 
   useEffect(() => {
     let cancelled = false
-    resolveImageUrl(src, assetId)
+    resolveDisplayUrl(src, assetId, variant)
       .then(url => {
         if (!cancelled) setResolvedSrc(url)
       })
@@ -16,7 +16,7 @@ export default function StoredImage({ src, assetId = null, alt = '', className =
     return () => {
       cancelled = true
     }
-  }, [src, assetId])
+  }, [src, assetId, variant])
 
   if (!resolvedSrc) return null
   return <img src={resolvedSrc} alt={alt} className={className} style={style} {...props} />

@@ -68,6 +68,7 @@ export function createCharacterLook(overrides = {}) {
     id: uid(),
     name: 'New Look',
     imageUrl: null,
+    imageAssetId: null,
     prompt: '',
     referenceImageIds: [],   // up to MAX_REFERENCE_IMAGES asset ids used when generating this look
     ...overrides,
@@ -412,6 +413,7 @@ const useComicStore = create((set, get) => {
         name: 'New Character',
         description: '',
         imageUrl: null,
+        imageAssetId: null,
         color: '#8b5cf6',
         prompt: '',              // reference-portrait generation prompt
         referenceImageIds: [],   // up to MAX_REFERENCE_IMAGES asset ids used when generating the reference portrait
