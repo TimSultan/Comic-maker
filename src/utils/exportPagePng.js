@@ -72,6 +72,19 @@ export async function renderPageCanvas(pageElement, { hideBubbles = false } = {}
     }
   })
 
+  // html2canvas exports each bubble svg by serializing it to a standalone
+  // image and drawing source rect (0, 0, boundsW, boundsH) from it — but the
+  // svg's inline percentage width/height override the px attributes it
+  // injects, so the browser rasterizes the standalone svg at a fallback size
+  // that doesn't match that source rect, and balloons come out slightly
+  // scaled/shifted against their text. Pinning the clone's svg CSS size to
+  // the exact layout px keeps CSS, attributes, raster, and source rect in
+  // agreement (see CanvasRenderer.renderReplacedElement in html2canvas).
+  const bubbleSvgSizes = [...pageElement.querySelectorAll('[data-bubble-layer] svg')].map(svg => {
+    const rect = svg.getBoundingClientRect()
+    return { width: rect.width, height: rect.height }
+  })
+
   // The canvas normally only has each panel's compressed display preview
   // loaded — PNG/PDF export needs full quality, so resolve every distinct
   // asset id up front and swap the clone's <img> src for it below.
@@ -106,6 +119,19 @@ export async function renderPageCanvas(pageElement, { hideBubbles = false } = {}
 
       // Apply explicit cover-correct dimensions so html2canvas doesn't stretch images.
       const clonedPage = documentClone.querySelector('[data-comic-page]')
+
+      // Pin bubble svg sizes to exact px (see bubbleSvgSizes above). The
+      // live and cloned documents share layout, so index pairing is stable;
+      // when hideBubbles removed the layers this finds nothing and no-ops.
+      const clonedSvgs = clonedPage
+        ? [...clonedPage.querySelectorAll('[data-bubble-layer] svg')]
+        : []
+      clonedSvgs.forEach((svg, i) => {
+        const size = bubbleSvgSizes[i]
+        if (!size || !size.width || !size.height) return
+        svg.style.width = `${size.width}px`
+        svg.style.height = `${size.height}px`
+      })
       const clonedImgs = clonedPage
         ? [...clonedPage.querySelectorAll('[data-comic-panel] img')]
         : []
