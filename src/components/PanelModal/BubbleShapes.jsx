@@ -448,7 +448,20 @@ const SHAPE_SHADOW_PROPS = {
   stroke: 'none',
 }
 
+// The tail can extend well past the bubble's box, so the balloon SVG lives
+// on a 3x frame around it (viewBox -100..200 maps onto that frame). The
+// frame must be a plain div with the svg filling it 100%: html2canvas
+// exports inline SVGs by serializing them to standalone images, and in a
+// standalone SVG the root's CSS percentage size resolves against the drawn
+// viewport itself — any root size other than 100% rasterizes the balloon at
+// the wrong scale in PNG/PDF exports.
 function BalloonSvg({ bubble, aspect = 1 }) {
+  const content = renderBalloonSvg(bubble, aspect)
+  if (!content) return null
+  return <div style={svgFrameStyle}>{content}</div>
+}
+
+function renderBalloonSvg(bubble, aspect) {
   const { appearance, tail, shape } = bubble
   const fill = appearance.fill
   const stroke = appearance.stroke
@@ -531,13 +544,20 @@ function BalloonSvg({ bubble, aspect = 1 }) {
   )
 }
 
-const svgStyle = {
+const svgFrameStyle = {
   position: 'absolute',
   left: '-100%',
   top: '-100%',
   width: '300%',
   height: '300%',
   pointerEvents: 'none',
+}
+
+const svgStyle = {
+  position: 'absolute',
+  inset: 0,
+  width: '100%',
+  height: '100%',
 }
 
 function textPadding(shape) {
