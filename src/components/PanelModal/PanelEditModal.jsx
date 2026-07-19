@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import useComicStore from '../../store/useComicStore'
 import { BUBBLE_STYLE_PRESETS, PERSPECTIVES, getGridDims, getPanelPlacement, uid } from '../../utils/defaults'
-import { BubbleShape, getBubblePresetDefaults, getBubbleTailBasePoint } from './BubbleShapes'
+import { BubbleShape, getBubblePresetDefaults, getBubbleTailBasePoint, getBubbleTailGeometry, bendFromTailPoint } from './BubbleShapes'
 import PanelImage from '../PanelImage'
 import { clampPanelImageOffset, MIN_PANEL_IMAGE_SCALE, MAX_PANEL_IMAGE_SCALE } from '../../utils/panelImageTransform'
 import { logEvent, describeTarget } from '../../utils/debugLog'
@@ -119,9 +119,39 @@ function getTailBaseHandle(bubble = {}) {
   }
 }
 
+// Measures the bubble box's on-screen width/height so the tail-handle math
+// (BubbleShapes' getBubbleTailGeometry/bendFromTailPoint) can correct for it
+// not being square — mirrors the ResizeObserver BubbleShape itself uses to
+// drive the SVG's tail geometry, kept local here since it only positions
+// handles, not the shape.
+function useElementAspect(ref) {
+  const [aspect, setAspect] = useState(1)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return undefined
+    const update = () => {
+      const rect = el.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) setAspect(rect.width / rect.height)
+    }
+    update()
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', update)
+      return () => window.removeEventListener('resize', update)
+    }
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [ref])
+
+  return aspect
+}
+
 function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, onResize, onDelete }) {
   const getHistorySnapshot = useComicStore(s => s.getHistorySnapshot)
   const commitHistorySnapshot = useComicStore(s => s.commitHistorySnapshot)
+  const wrapperRef = useRef(null)
+  const aspect = useElementAspect(wrapperRef)
 
   const handlePointerDown = useCallback((e) => {
     e.stopPropagation()
@@ -222,6 +252,43 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
     document.addEventListener('pointercancel', onPointerUp)
   }, [bubble.id, bubble.tail, commitHistorySnapshot, getHistorySnapshot, onSelect, onTailUpdate])
 
+  const handleMidPointerDown = useCallback((e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    onSelect(bubble.id)
+
+    const bubbleEl = e.currentTarget.parentElement
+    const rect = bubbleEl.getBoundingClientRect()
+    const historySnapshot = getHistorySnapshot()
+
+    const updateBend = (ev) => {
+      const point = [
+        ((ev.clientX - rect.left) / rect.width) * 100,
+        ((ev.clientY - rect.top) / rect.height) * 100,
+      ]
+      const bend = bendFromTailPoint(bubble, aspect, point)
+      onTailUpdate(bubble.id, { tail: { ...(bubble.tail || {}), bend } })
+    }
+
+    const onPointerUp = () => {
+      commitHistorySnapshot(historySnapshot)
+      document.removeEventListener('pointermove', updateBend)
+      document.removeEventListener('pointerup', onPointerUp)
+      document.removeEventListener('pointercancel', onPointerUp)
+    }
+
+    document.addEventListener('pointermove', updateBend)
+    document.addEventListener('pointerup', onPointerUp)
+    document.addEventListener('pointercancel', onPointerUp)
+  }, [aspect, bubble, commitHistorySnapshot, getHistorySnapshot, onSelect, onTailUpdate])
+
+  const handleTailStraighten = useCallback((e) => {
+    e.stopPropagation()
+    const historySnapshot = getHistorySnapshot()
+    onTailUpdate(bubble.id, { tail: { ...(bubble.tail || {}), bend: 0 } })
+    commitHistorySnapshot(historySnapshot)
+  }, [bubble.id, bubble.tail, commitHistorySnapshot, getHistorySnapshot, onTailUpdate])
+
   const handleResizePointerDown = useCallback((e) => {
     e.preventDefault()
     e.stopPropagation()
@@ -272,10 +339,15 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
 
   const tail = bubble.tail || {}
   const showTailHandle = isSelected && supportsBubbleTail(bubble) && tail.enabled !== false
-  const baseHandle = getTailBaseHandle(bubble)
+  // Thought bubbles draw their trail from the target point alone — the fluid
+  // tail's base/bend have no visual effect there, so only the target handle
+  // is offered.
+  const hasFluidTail = getStyleFromBubble(bubble) !== 'thought-soft'
+  const geometry = getBubbleTailGeometry(bubble, aspect)
 
   return (
     <div
+      ref={wrapperRef}
       className="touch-none"
       style={{
         position: 'absolute',
@@ -296,17 +368,19 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
       <BubbleShape bubble={bubble} />
       {showTailHandle && (
         <>
+          {hasFluidTail && (
           <div
             className="absolute w-3 h-3 rounded-full bg-sky-400 border-2 border-white shadow cursor-crosshair touch-none"
             style={{
-              left: `${baseHandle.x}%`,
-              top: `${baseHandle.y}%`,
+              left: `${geometry.base[0]}%`,
+              top: `${geometry.base[1]}%`,
               transform: 'translate(-50%, -50%)',
               zIndex: 20,
             }}
-            title={baseHandle.automatic ? 'Drag tail base (auto)' : 'Drag tail base'}
+            title={geometry.automatic ? 'Drag tail base (auto)' : 'Drag tail base'}
             onPointerDown={handleBasePointerDown}
           />
+          )}
           <div
             className="absolute w-3 h-3 rounded-full bg-purple-400 border-2 border-white shadow cursor-crosshair touch-none"
             style={{
@@ -318,6 +392,20 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
             title="Drag tail target"
             onPointerDown={handleTailPointerDown}
           />
+          {hasFluidTail && (
+          <div
+            className="absolute w-3 h-3 rounded-full bg-amber-400 border-2 border-white shadow cursor-crosshair touch-none"
+            style={{
+              left: `${geometry.mid[0]}%`,
+              top: `${geometry.mid[1]}%`,
+              transform: 'translate(-50%, -50%)',
+              zIndex: 20,
+            }}
+            title="Drag to curve the tail (double-click to straighten)"
+            onPointerDown={handleMidPointerDown}
+            onDoubleClick={handleTailStraighten}
+          />
+          )}
         </>
       )}
       {isSelected && (
@@ -599,8 +687,8 @@ function BubbleRow({ bubble, idx, isSelected, onSelect, onUpdate, onRemove, onDu
   const noTailStyles = ['caption-box', 'narration-box', 'shout-burst', 'whisper-dashed', 'sfx-impact']
   const supportsTail = !noTailStyles.includes(style)
   const typography = {
-    fontSize: 13,
-    weight: 800,
+    fontSize: 11,
+    weight: 700,
     uppercase: true,
     italic: false,
     align: 'center',
@@ -617,8 +705,8 @@ function BubbleRow({ bubble, idx, isSelected, onSelect, onUpdate, onRemove, onDu
     enabled: supportsTail,
     side: 'bottom-left',
     targetX: 18,
-    targetY: 94,
-    bend: -10,
+    targetY: 122,
+    bend: 0,
     baseWidth: 16,
     ...(bubble.tail || {}),
   }

@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 // Text never shrinks past this, no matter how small the bubble or how long
 // the text — matches the floor of the manual "Font" size slider.
@@ -27,68 +27,94 @@ function useAutoFitFontSize(textRef, preferredSize, layoutKey) {
   return size
 }
 
+// Measures the bubble wrapper's on-screen width/height so tail geometry can
+// correct for the box not being square (see the corrected-space comment on
+// pathWithFluidTail). Defaults to 1 (square) until the first measurement.
+function useElementAspect(ref) {
+  const [aspect, setAspect] = useState(1)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return undefined
+    const update = () => {
+      const rect = el.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) setAspect(rect.width / rect.height)
+    }
+    update()
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', update)
+      return () => window.removeEventListener('resize', update)
+    }
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [ref])
+
+  return aspect
+}
+
 const PRESET_DEFAULTS = {
   'classic-comic': {
     type: 'speech',
     shape: 'rounded',
-    tail: { enabled: true, side: 'bottom-left', targetX: 18, targetY: 94, bend: -10, baseWidth: 16 },
-    typography: { fontSize: 13, weight: 800, uppercase: true, italic: false, align: 'center', fontSizeLocked: false },
+    tail: { enabled: true, side: 'bottom-left', targetX: 18, targetY: 122, bend: 0, baseWidth: 16 },
+    typography: { fontSize: 11, weight: 700, uppercase: true, italic: false, align: 'center', fontSizeLocked: false },
     appearance: { fill: '#ffffff', stroke: '#111111', strokeWidth: 3 },
   },
   'manga-dialogue': {
     type: 'speech',
     shape: 'oval',
-    tail: { enabled: true, side: 'bottom-right', targetX: 82, targetY: 94, bend: 10, baseWidth: 16 },
-    typography: { fontSize: 13, weight: 700, uppercase: false, italic: false, align: 'center', fontSizeLocked: false },
+    tail: { enabled: true, side: 'bottom-right', targetX: 82, targetY: 122, bend: 0, baseWidth: 16 },
+    typography: { fontSize: 11, weight: 600, uppercase: false, italic: false, align: 'center', fontSizeLocked: false },
     appearance: { fill: '#ffffff', stroke: '#111111', strokeWidth: 2.5 },
   },
   'thought-soft': {
     type: 'thought',
     shape: 'thought',
-    tail: { enabled: true, side: 'bottom-left', targetX: 18, targetY: 94, bend: -8, baseWidth: 14 },
-    typography: { fontSize: 12, weight: 600, uppercase: false, italic: true, align: 'center', fontSizeLocked: false },
+    tail: { enabled: true, side: 'bottom-left', targetX: 18, targetY: 118, bend: 0, baseWidth: 14 },
+    typography: { fontSize: 10, weight: 600, uppercase: false, italic: true, align: 'center', fontSizeLocked: false },
     appearance: { fill: '#ffffff', stroke: '#444444', strokeWidth: 2.5 },
   },
   'shout-burst': {
     type: 'shout',
     shape: 'burst',
     tail: { enabled: false, side: 'bottom-left', targetX: 18, targetY: 94, bend: 0, baseWidth: 16 },
-    typography: { fontSize: 14, weight: 900, uppercase: true, italic: false, align: 'center', fontSizeLocked: false },
+    typography: { fontSize: 13, weight: 900, uppercase: true, italic: false, align: 'center', fontSizeLocked: false },
     appearance: { fill: '#ffffff', stroke: '#000000', strokeWidth: 3 },
   },
   'whisper-dashed': {
     type: 'whisper',
     shape: 'whisper',
     tail: { enabled: false, side: 'bottom-left', targetX: 18, targetY: 94, bend: 0, baseWidth: 12 },
-    typography: { fontSize: 11, weight: 500, uppercase: false, italic: true, align: 'center', fontSizeLocked: false },
+    typography: { fontSize: 10, weight: 500, uppercase: false, italic: true, align: 'center', fontSizeLocked: false },
     appearance: { fill: '#ffffff', stroke: '#777777', strokeWidth: 2 },
   },
   'caption-box': {
     type: 'caption',
     shape: 'caption',
     tail: { enabled: false, side: 'bottom-left', targetX: 18, targetY: 94, bend: 0, baseWidth: 12 },
-    typography: { fontSize: 11, weight: 700, uppercase: false, italic: false, align: 'left', fontSizeLocked: false },
+    typography: { fontSize: 10, weight: 700, uppercase: false, italic: false, align: 'left', fontSizeLocked: false },
     appearance: { fill: '#f8e7a0', stroke: '#111111', strokeWidth: 2 },
   },
   'narration-box': {
     type: 'narration',
     shape: 'caption',
     tail: { enabled: false, side: 'bottom-left', targetX: 18, targetY: 94, bend: 0, baseWidth: 12 },
-    typography: { fontSize: 11, weight: 600, uppercase: false, italic: true, align: 'left', fontSizeLocked: false },
+    typography: { fontSize: 10, weight: 600, uppercase: false, italic: true, align: 'left', fontSizeLocked: false },
     appearance: { fill: '#fef3c7', stroke: '#78350f', strokeWidth: 2 },
   },
   'radio-electric': {
     type: 'speech',
     shape: 'radio',
-    tail: { enabled: true, side: 'bottom-right', targetX: 80, targetY: 94, bend: 8, baseWidth: 14 },
-    typography: { fontSize: 12, weight: 800, uppercase: true, italic: false, align: 'center', fontSizeLocked: false },
+    tail: { enabled: true, side: 'bottom-right', targetX: 80, targetY: 118, bend: 0, baseWidth: 14 },
+    typography: { fontSize: 11, weight: 800, uppercase: true, italic: false, align: 'center', fontSizeLocked: false },
     appearance: { fill: '#e0f2fe', stroke: '#0f172a', strokeWidth: 2.5 },
   },
   'sfx-impact': {
     type: 'sfx',
     shape: 'sfx',
     tail: { enabled: false, side: 'bottom-left', targetX: 18, targetY: 94, bend: 0, baseWidth: 12 },
-    typography: { fontSize: 22, weight: 900, uppercase: true, italic: true, align: 'center', fontSizeLocked: false },
+    typography: { fontSize: 20, weight: 900, uppercase: true, italic: true, align: 'center', fontSizeLocked: false },
     appearance: { fill: '#fde047', stroke: '#111111', strokeWidth: 2 },
   },
 }
@@ -131,20 +157,26 @@ function Empty() {
   return <em style={{ opacity: 0.35, fontSize: 11, fontWeight: 400, fontStyle: 'italic' }}>empty</em>
 }
 
-function tailCurveSegment(from, target, to, tail) {
-  const bend = clamp(tail?.bend ?? 0, -40, 40)
+// Unit normal of (target - midpoint(from, to)), pointing the direction the
+// tail curve bends toward. Shared by tailCurveSegment (drawing the curve)
+// and the handle-geometry helpers below (positioning/dragging the curve's
+// midpoint handle) so the handle always sits exactly on the drawn curve.
+function tailNormal(from, target, to) {
   const mx = (from[0] + to[0]) / 2
   const my = (from[1] + to[1]) / 2
   const vx = target[0] - mx
   const vy = target[1] - my
   const len = Math.hypot(vx, vy) || 1
-  const nx = -vy / len
-  const ny = vx / len
-  const c1x = (from[0] + target[0]) / 2 + nx * bend
-  const c1y = (from[1] + target[1]) / 2 + ny * bend
-  const c2x = (to[0] + target[0]) / 2 + nx * bend
-  const c2y = (to[1] + target[1]) / 2 + ny * bend
-  return `Q ${c1x} ${c1y} ${target[0]} ${target[1]} Q ${c2x} ${c2y} ${to[0]} ${to[1]}`
+  return [-vy / len, vx / len]
+}
+
+function tailCurveSegment(from, target, to, tail) {
+  const bend = clamp(tail?.bend ?? 0, -40, 40)
+  const [nx, ny] = tailNormal(from, target, to)
+  return {
+    c1: [(from[0] + target[0]) / 2 + nx * bend, (from[1] + target[1]) / 2 + ny * bend],
+    c2: [(to[0] + target[0]) / 2 + nx * bend, (to[1] + target[1]) / 2 + ny * bend],
+  }
 }
 
 function makeOvalPoints(count = 96) {
@@ -287,23 +319,50 @@ function shapeTailPoints(shape) {
   return makeRoundedPoints()
 }
 
-function tailBasePoint(points, tail, target) {
-  if (Number.isFinite(tail?.baseX) && Number.isFinite(tail?.baseY)) {
-    return [clamp(tail.baseX, 0, 100), clamp(tail.baseY, 0, 100)]
+// Bubble div boxes are rarely square on screen, but the shape's outline is
+// authored on a square 0-100 grid and the SVG is stretched non-uniformly
+// (preserveAspectRatio="none") to fill the box. Doing tail geometry (ray
+// casts, boundary walks, perpendicular bends) directly in that 0-100 space
+// means angles come out wrong once stretched. "Corrected space" undoes the
+// stretch — x * sqrt(aspect), y / sqrt(aspect) — so those computations are
+// faithful to what actually renders on screen; sqrt(aspect) is used (rather
+// than aspect) because the correction is a symmetric one-axis-up/one-axis-
+// down scale, matching how a non-uniform stretch splits between both axes.
+// Everything below runs on corrected points/targets and is mapped back to
+// the original 0-100 (percent) space only when producing output.
+function toCorrectedSpace(aspect) {
+  const s = Math.sqrt(aspect) || 1
+  return {
+    s,
+    toC: ([x, y]) => [x * s, y / s],
+    fromC: ([x, y]) => [x / s, y * s],
   }
-  return autoTailBasePoint(points, target)
 }
 
-function pathWithFluidTail(points, tail) {
-  const target = [clamp(tail?.targetX ?? 18, -80, 180), clamp(tail?.targetY ?? 94, -80, 180)]
-  const desiredBase = tailBasePoint(points, tail, target)
-  const centerIdx = closestPointIndex(points, desiredBase)
+// Single source of truth for the tail's base/target points (in corrected
+// space) given a bubble's raw shape points + tail config. Used by both the
+// path builder (pathWithFluidTail) and the handle-geometry helpers exported
+// below, so the draggable handles always match what's actually drawn.
+function computeTailFrame(points, tail, aspect) {
+  const { toC, fromC, s } = toCorrectedSpace(aspect)
+  const correctedPoints = points.map(toC)
+  const target = toC([clamp(tail?.targetX ?? 18, -80, 180), clamp(tail?.targetY ?? 94, -80, 180)])
+  const manualBase = Number.isFinite(tail?.baseX) && Number.isFinite(tail?.baseY)
+  const desiredBase = manualBase
+    ? toC([clamp(tail.baseX, 0, 100), clamp(tail.baseY, 0, 100)])
+    : autoTailBasePoint(correctedPoints, target)
+  const centerIdx = closestPointIndex(correctedPoints, desiredBase)
   const baseHalf = clamp(tail?.baseWidth ?? 14, 4, 40) / 2
-  const a = walkBoundary(points, centerIdx, baseHalf, -1)
-  const b = walkBoundary(points, centerIdx, baseHalf, 1)
-  const aIdx = closestPointIndex(points, a)
-  const bIdx = closestPointIndex(points, b)
-  const count = points.length
+  const a = walkBoundary(correctedPoints, centerIdx, baseHalf, -1)
+  const b = walkBoundary(correctedPoints, centerIdx, baseHalf, 1)
+  return { s, toC, fromC, correctedPoints, target, desiredBase, automatic: !manualBase, a, b }
+}
+
+function pathWithFluidTail(points, tail, aspect = 1) {
+  const { fromC, correctedPoints, target, a, b } = computeTailFrame(points, tail, aspect)
+  const aIdx = closestPointIndex(correctedPoints, a)
+  const bIdx = closestPointIndex(correctedPoints, b)
+  const count = correctedPoints.length
   const outline = []
   let idx = aIdx
   while (idx !== bIdx) {
@@ -311,32 +370,85 @@ function pathWithFluidTail(points, tail) {
     idx = (idx - 1 + count) % count
   }
   outline.push(points[bIdx])
+
+  const { c1, c2 } = tailCurveSegment(b, target, a, tail)
+  const aOut = fromC(a)
+  const targetOut = fromC(target)
+  const c1Out = fromC(c1)
+  const c2Out = fromC(c2)
+
   return [
-    `M ${a[0]} ${a[1]}`,
+    `M ${aOut[0]} ${aOut[1]}`,
     outline.map(p => `L ${p[0]} ${p[1]}`).join(' '),
-    tailCurveSegment(b, target, a, tail),
+    `Q ${c1Out[0]} ${c1Out[1]} ${targetOut[0]} ${targetOut[1]} Q ${c2Out[0]} ${c2Out[1]} ${aOut[0]} ${aOut[1]}`,
     'Z',
   ].join(' ')
 }
 
-function roundedPath(tailEnabled, tail) {
+function roundedPath(tailEnabled, tail, aspect = 1) {
   const points = makeRoundedPoints()
-  return tailEnabled ? pathWithFluidTail(points, tail) : boundaryPath(points)
+  return tailEnabled ? pathWithFluidTail(points, tail, aspect) : boundaryPath(points)
 }
 
-function ovalPath(tailEnabled, tail) {
+function ovalPath(tailEnabled, tail, aspect = 1) {
   const points = makeOvalPoints()
-  return tailEnabled ? pathWithFluidTail(points, tail) : boundaryPath(points)
+  return tailEnabled ? pathWithFluidTail(points, tail, aspect) : boundaryPath(points)
+}
+
+// Base/target/curve-midpoint of a bubble's tail, in bubble-% space. `mid` is
+// where the curve-bend handle sits: the base-target midpoint offset by the
+// bend along the same normal tailCurveSegment uses, so the handle always
+// lands exactly on the drawn curve.
+export function getBubbleTailGeometry(bubble, aspect = 1) {
+  const normalized = mergePreset(bubble || {})
+  const points = shapeTailPoints(normalized.shape)
+  const tail = normalized.tail
+  const { fromC, target, desiredBase, automatic, a, b } = computeTailFrame(points, tail, aspect)
+  const bend = clamp(tail?.bend ?? 0, -40, 40)
+  const [nx, ny] = tailNormal(b, target, a)
+  const mid = [
+    (desiredBase[0] + target[0]) / 2 + nx * bend,
+    (desiredBase[1] + target[1]) / 2 + ny * bend,
+  ]
+  return {
+    base: fromC(desiredBase),
+    target: fromC(target),
+    mid: fromC(mid),
+    automatic,
+  }
+}
+
+// Given a pointer position (bubble-% space), returns the `bend` value that
+// would place the curve's midpoint handle there — the inverse of the `mid`
+// calculation in getBubbleTailGeometry.
+export function bendFromTailPoint(bubble, aspect, point) {
+  const normalized = mergePreset(bubble || {})
+  const points = shapeTailPoints(normalized.shape)
+  const tail = normalized.tail
+  const { toC, target, desiredBase, a, b } = computeTailFrame(points, tail, aspect)
+  const [nx, ny] = tailNormal(b, target, a)
+  const p = toC([point[0], point[1]])
+  const midBaseTarget = [(desiredBase[0] + target[0]) / 2, (desiredBase[1] + target[1]) / 2]
+  const bend = (p[0] - midBaseTarget[0]) * nx + (p[1] - midBaseTarget[1]) * ny
+  return clamp(bend, -40, 40)
 }
 
 export function getBubbleTailBasePoint(bubble) {
-  const normalized = mergePreset(bubble || {})
-  const target = [clamp(normalized.tail?.targetX ?? 18, -80, 180), clamp(normalized.tail?.targetY ?? 94, -80, 180)]
-  const points = shapeTailPoints(normalized.shape)
-  return tailBasePoint(points, normalized.tail, target)
+  return getBubbleTailGeometry(bubble, 1).base
 }
 
-function BalloonSvg({ bubble }) {
+// Shadow-copy attrs shared by every shape except burst (which uses a bigger
+// offset/darker fill, set inline below) and sfx (no shadow rendered at all).
+// html2canvas can't render CSS filter: drop-shadow, so shadows are drawn as
+// an actual offset copy of the shape behind the main path instead — see
+// BubbleShape, which used to apply drop-shadow as a container filter.
+const SHAPE_SHADOW_PROPS = {
+  transform: 'translate(1.2 1.8)',
+  fill: 'rgba(15, 23, 42, 0.22)',
+  stroke: 'none',
+}
+
+function BalloonSvg({ bubble, aspect = 1 }) {
   const { appearance, tail, shape } = bubble
   const fill = appearance.fill
   const stroke = appearance.stroke
@@ -347,7 +459,8 @@ function BalloonSvg({ bubble }) {
 
   if (shape === 'burst') {
     return (
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={svgStyle}>
+      <svg viewBox="-100 -100 300 300" preserveAspectRatio="none" style={svgStyle}>
+        <polygon points={BURST_POINTS} transform="translate(1.6 2.2)" fill="rgba(0, 0, 0, 0.6)" stroke="none" vectorEffect="non-scaling-stroke" />
         <polygon points={BURST_POINTS} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
     )
@@ -355,7 +468,8 @@ function BalloonSvg({ bubble }) {
 
   if (shape === 'caption') {
     return (
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={svgStyle}>
+      <svg viewBox="-100 -100 300 300" preserveAspectRatio="none" style={svgStyle}>
+        <path d="M 3 8 H 97 V 92 H 3 Z" {...SHAPE_SHADOW_PROPS} vectorEffect="non-scaling-stroke" />
         <path d="M 3 8 H 97 V 92 H 3 Z" fill={fill} stroke={stroke} strokeWidth={strokeWidth} vectorEffect="non-scaling-stroke" />
         <path d="M 7 14 H 93" stroke="rgba(0,0,0,0.18)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
       </svg>
@@ -364,13 +478,14 @@ function BalloonSvg({ bubble }) {
 
   if (shape === 'thought') {
     return (
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={svgStyle}>
+      <svg viewBox="-100 -100 300 300" preserveAspectRatio="none" style={svgStyle}>
+        <ellipse cx="50" cy="42" rx="43" ry="31" {...SHAPE_SHADOW_PROPS} vectorEffect="non-scaling-stroke" />
         <ellipse cx="50" cy="42" rx="43" ry="31" fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
         {tail?.enabled && (
           <>
-            <circle cx={clamp(tail.targetX ?? 20, 6, 94)} cy={clamp(tail.targetY ?? 91, 8, 96)} r="4.8" fill={fill} stroke={stroke} strokeWidth="2" vectorEffect="non-scaling-stroke" />
-            <circle cx={clamp((tail.targetX ?? 20) + 8, 8, 95)} cy={clamp((tail.targetY ?? 91) - 8, 8, 96)} r="3.3" fill={fill} stroke={stroke} strokeWidth="1.7" vectorEffect="non-scaling-stroke" />
-            <circle cx={clamp((tail.targetX ?? 20) + 14, 8, 95)} cy={clamp((tail.targetY ?? 91) - 15, 8, 96)} r="2.3" fill={fill} stroke={stroke} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+            <circle cx={clamp(tail.targetX ?? 20, -95, 195)} cy={clamp(tail.targetY ?? 91, -95, 195)} r="4.8" fill={fill} stroke={stroke} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+            <circle cx={clamp((tail.targetX ?? 20) + 8, -95, 195)} cy={clamp((tail.targetY ?? 91) - 8, -95, 195)} r="3.3" fill={fill} stroke={stroke} strokeWidth="1.7" vectorEffect="non-scaling-stroke" />
+            <circle cx={clamp((tail.targetX ?? 20) + 14, -95, 195)} cy={clamp((tail.targetY ?? 91) - 15, -95, 195)} r="2.3" fill={fill} stroke={stroke} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
           </>
         )}
       </svg>
@@ -379,42 +494,49 @@ function BalloonSvg({ bubble }) {
 
   if (shape === 'whisper') {
     return (
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={svgStyle}>
+      <svg viewBox="-100 -100 300 300" preserveAspectRatio="none" style={svgStyle}>
+        <ellipse cx="50" cy="50" rx="45" ry="35" {...SHAPE_SHADOW_PROPS} vectorEffect="non-scaling-stroke" />
         <ellipse cx="50" cy="50" rx="45" ry="35" fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
       </svg>
     )
   }
 
   if (shape === 'radio') {
+    const d = roundedPath(tailEnabled, tail, aspect)
     return (
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={svgStyle}>
-        <path d={roundedPath(tailEnabled, tail)} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      <svg viewBox="-100 -100 300 300" preserveAspectRatio="none" style={svgStyle}>
+        <path d={d} {...SHAPE_SHADOW_PROPS} vectorEffect="non-scaling-stroke" />
+        <path d={d} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         <path d="M 18 25 H 82 M 18 66 H 82" stroke="rgba(15,23,42,0.35)" strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
       </svg>
     )
   }
 
   if (shape === 'oval') {
+    const d = ovalPath(tailEnabled, tail, aspect)
     return (
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={svgStyle}>
-        <path d={ovalPath(tailEnabled, tail)} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      <svg viewBox="-100 -100 300 300" preserveAspectRatio="none" style={svgStyle}>
+        <path d={d} {...SHAPE_SHADOW_PROPS} vectorEffect="non-scaling-stroke" />
+        <path d={d} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
     )
   }
 
+  const d = roundedPath(tailEnabled, tail, aspect)
   return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={svgStyle}>
-      <path d={roundedPath(tailEnabled, tail)} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    <svg viewBox="-100 -100 300 300" preserveAspectRatio="none" style={svgStyle}>
+      <path d={d} {...SHAPE_SHADOW_PROPS} vectorEffect="non-scaling-stroke" />
+      <path d={d} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
     </svg>
   )
 }
 
 const svgStyle = {
   position: 'absolute',
-  inset: 0,
-  width: '100%',
-  height: '100%',
-  overflow: 'visible',
+  left: '-100%',
+  top: '-100%',
+  width: '300%',
+  height: '300%',
   pointerEvents: 'none',
 }
 
@@ -434,6 +556,21 @@ function minHeight(shape) {
   return 54
 }
 
+// html2canvas doesn't render -webkit-text-stroke or filter: drop-shadow, so
+// the sfx outline is faked with a ring of 12 solid text-shadows (one every
+// 30°) at the stroke's radius, plus a small drop shadow — text-shadow does
+// export correctly.
+function sfxTextShadow(appearance) {
+  const w = appearance.strokeWidth
+  const ring = Array.from({ length: 12 }, (_, i) => {
+    const a = (i * 30 * Math.PI) / 180
+    const dx = Math.round(Math.cos(a) * w * 100) / 100
+    const dy = Math.round(Math.sin(a) * w * 100) / 100
+    return `${dx}px ${dy}px 0 ${appearance.stroke}`
+  })
+  return [...ring, '2px 3px 0 rgba(0,0,0,0.35)'].join(', ')
+}
+
 function textStyle(bubble, fontSizeOverride) {
   const { typography, appearance, shape } = bubble
   const textColor = shape === 'sfx' ? appearance.fill : '#111111'
@@ -449,7 +586,7 @@ function textStyle(bubble, fontSizeOverride) {
     justifyContent: typography.align === 'left' ? 'flex-start' : typography.align === 'right' ? 'flex-end' : 'center',
     textAlign: typography.align || 'center',
     color: textColor,
-    fontFamily: '"Trebuchet MS", "Comic Sans MS", "Arial Black", sans-serif',
+    fontFamily: '"Comic Neue", "Comic Sans MS", "Trebuchet MS", sans-serif',
     fontSize: fontSizeOverride ?? typography.fontSize,
     fontWeight: typography.weight,
     fontStyle: typography.italic ? 'italic' : 'normal',
@@ -458,8 +595,7 @@ function textStyle(bubble, fontSizeOverride) {
     textTransform: typography.uppercase ? 'uppercase' : 'none',
     overflowWrap: 'anywhere',
     wordBreak: 'normal',
-    WebkitTextStroke: shape === 'sfx' ? `${appearance.strokeWidth}px ${appearance.stroke}` : undefined,
-    filter: shape === 'sfx' ? 'drop-shadow(2px 2px 0 rgba(0,0,0,0.35))' : undefined,
+    textShadow: shape === 'sfx' ? sfxTextShadow(appearance) : undefined,
   }
 }
 
@@ -468,6 +604,9 @@ export function BubbleShape({ bubble, type, text }) {
   const value = normalized.text || text || ''
   const explicitHeight = normalized.height != null
   const { typography } = normalized
+
+  const wrapperRef = useRef(null)
+  const aspect = useElementAspect(wrapperRef)
 
   const textRef = useRef(null)
   const layoutKey = [
@@ -478,14 +617,14 @@ export function BubbleShape({ bubble, type, text }) {
 
   return (
     <div
+      ref={wrapperRef}
       style={{
         position: 'relative',
         minHeight: explicitHeight ? '100%' : minHeight(normalized.shape),
         height: explicitHeight ? '100%' : undefined,
-        filter: normalized.shape === 'burst' ? 'drop-shadow(1px 1px 0 #000)' : 'drop-shadow(0 1px 0 rgba(0,0,0,0.18))',
       }}
     >
-      <BalloonSvg bubble={normalized} />
+      <BalloonSvg bubble={normalized} aspect={aspect} />
       <div ref={textRef} style={textStyle(normalized, fitFontSize)}>
         {value ? value : <Empty />}
       </div>

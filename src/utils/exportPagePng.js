@@ -38,6 +38,10 @@ function canvasBlob(canvas) {
 
 export async function renderPageCanvas(pageElement, { hideBubbles = false } = {}) {
   if (!pageElement) throw new Error('No rendered page found to export.')
+  // Bubble text uses a webfont (Comic Neue); if it hasn't finished loading
+  // yet, html2canvas snapshots with the fallback font and export won't match
+  // what's on screen.
+  if (document.fonts?.ready) await document.fonts.ready
   await Promise.all([...pageElement.querySelectorAll('img')].map(waitForImage))
 
   // Snapshot live image layouts before cloning, because html2canvas does not
