@@ -22,6 +22,12 @@ function deepClone(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
+// When a bubble/handle drag ends with the pointer over empty canvas, the
+// browser synthesizes a click on the canvas (the common ancestor of press
+// and release targets) right after pointerup. addBubbleAtPoint checks this
+// timestamp to tell that fake click apart from a real "place bubble" click.
+let lastBubbleDragEndAt = 0
+
 function applyBubbleStyle(style) {
   const preset = getBubblePresetDefaults(style)
   return {
@@ -147,7 +153,7 @@ function useElementAspect(ref) {
   return aspect
 }
 
-function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, onResize, onDelete }) {
+function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, onResize }) {
   const getHistorySnapshot = useComicStore(s => s.getHistorySnapshot)
   const commitHistorySnapshot = useComicStore(s => s.commitHistorySnapshot)
   const wrapperRef = useRef(null)
@@ -161,10 +167,14 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
     if (!panelEl) return
 
     const panelRect = panelEl.getBoundingClientRect()
-    const panelLeft = panelRect.left + panelEl.clientLeft
-    const panelTop = panelRect.top + panelEl.clientTop
-    const panelW = panelEl.clientWidth
-    const panelH = panelEl.clientHeight
+    // The canvas may be CSS-scaled by the editor's view zoom: rects are
+    // visual px but client/offset sizes are layout px, so scale the latter.
+    const scaleX = panelEl.offsetWidth ? panelRect.width / panelEl.offsetWidth : 1
+    const scaleY = panelEl.offsetHeight ? panelRect.height / panelEl.offsetHeight : 1
+    const panelLeft = panelRect.left + panelEl.clientLeft * scaleX
+    const panelTop = panelRect.top + panelEl.clientTop * scaleY
+    const panelW = panelEl.clientWidth * scaleX
+    const panelH = panelEl.clientHeight * scaleY
     const grabOffsetX = e.clientX - panelLeft - (bubble.x / 100) * panelW
     const grabOffsetY = e.clientY - panelTop - (bubble.y / 100) * panelH
     const historySnapshot = getHistorySnapshot()
@@ -179,6 +189,7 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
     }
 
     const onPointerUp = () => {
+      lastBubbleDragEndAt = Date.now()
       commitHistorySnapshot(historySnapshot)
       document.removeEventListener('pointermove', onPointerMove)
       document.removeEventListener('pointerup', onPointerUp)
@@ -210,6 +221,7 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
     }
 
     const onPointerUp = () => {
+      lastBubbleDragEndAt = Date.now()
       commitHistorySnapshot(historySnapshot)
       document.removeEventListener('pointermove', updateTarget)
       document.removeEventListener('pointerup', onPointerUp)
@@ -241,6 +253,7 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
     }
 
     const onPointerUp = () => {
+      lastBubbleDragEndAt = Date.now()
       commitHistorySnapshot(historySnapshot)
       document.removeEventListener('pointermove', updateBase)
       document.removeEventListener('pointerup', onPointerUp)
@@ -271,6 +284,7 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
     }
 
     const onPointerUp = () => {
+      lastBubbleDragEndAt = Date.now()
       commitHistorySnapshot(historySnapshot)
       document.removeEventListener('pointermove', updateBend)
       document.removeEventListener('pointerup', onPointerUp)
@@ -298,10 +312,13 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
     if (!panelEl) return
 
     const panelRect = panelEl.getBoundingClientRect()
-    const panelLeft = panelRect.left + panelEl.clientLeft
-    const panelTop = panelRect.top + panelEl.clientTop
-    const panelW = panelEl.clientWidth
-    const panelH = panelEl.clientHeight
+    // Same view-zoom correction as the move handler above.
+    const scaleX = panelEl.offsetWidth ? panelRect.width / panelEl.offsetWidth : 1
+    const scaleY = panelEl.offsetHeight ? panelRect.height / panelEl.offsetHeight : 1
+    const panelLeft = panelRect.left + panelEl.clientLeft * scaleX
+    const panelTop = panelRect.top + panelEl.clientTop * scaleY
+    const panelW = panelEl.clientWidth * scaleX
+    const panelH = panelEl.clientHeight * scaleY
     const startWidth = bubble.width ?? 35
     const startHeight = bubble.height ?? Math.max(8, (e.currentTarget.parentElement.getBoundingClientRect().height / panelH) * 100)
     const startFontSize = bubble.typography?.fontSize ?? 13
@@ -326,6 +343,7 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
     }
 
     const onPointerUp = () => {
+      lastBubbleDragEndAt = Date.now()
       commitHistorySnapshot(historySnapshot)
       document.removeEventListener('pointermove', onPointerMove)
       document.removeEventListener('pointerup', onPointerUp)
@@ -420,23 +438,6 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
           onPointerDown={handleResizePointerDown}
         />
       )}
-      {isSelected && (
-        <button
-          type="button"
-          className="absolute w-5 h-5 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-500 border-2 border-white shadow text-white text-xs leading-none transition-colors"
-          style={{
-            right: -9,
-            top: -9,
-            zIndex: 21,
-          }}
-          title="Delete bubble"
-          onMouseDown={e => e.stopPropagation()}
-          onPointerDown={e => e.stopPropagation()}
-          onClick={e => { e.stopPropagation(); onDelete(bubble.id) }}
-        >
-          ×
-        </button>
-      )}
     </div>
   )
 }
@@ -444,69 +445,13 @@ function DraggableBubble({ bubble, isSelected, onSelect, onMove, onTailUpdate, o
 function PanelImageInteractionLayer({ panel, canvasRef, onClickPoint }) {
   const layerRef = useRef(null)
   const dragRef = useRef(null)
-  const wheelSnapshotRef = useRef(null)
-  const wheelTimerRef = useRef(null)
   const updatePanelLive = useComicStore(s => s.updatePanelLive)
   const getHistorySnapshot = useComicStore(s => s.getHistorySnapshot)
   const commitHistorySnapshot = useComicStore(s => s.commitHistorySnapshot)
 
-  useEffect(() => {
-    return () => {
-      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
-    }
-  }, [])
-
-  const commitWheelZoom = useCallback(() => {
-    if (wheelTimerRef.current) {
-      clearTimeout(wheelTimerRef.current)
-      wheelTimerRef.current = null
-    }
-    if (!wheelSnapshotRef.current) return
-    commitHistorySnapshot(wheelSnapshotRef.current)
-    wheelSnapshotRef.current = null
-  }, [commitHistorySnapshot])
-
-  useEffect(() => {
-    const wheelTarget = canvasRef.current
-    logEvent('modal:layer-effect-mount', {
-      panelId: panel.id,
-      canvasFound: Boolean(wheelTarget),
-    })
-    if (!wheelTarget) return undefined
-
-    const handleWheel = (e) => {
-      if (e.target?.closest?.('input, textarea, select, button')) return
-      logEvent('modal:wheel-handler-fired', { panelId: panel.id, deltaY: e.deltaY, target: describeTarget(e.target) })
-      e.preventDefault()
-      e.stopPropagation()
-      if (!wheelSnapshotRef.current) wheelSnapshotRef.current = getHistorySnapshot()
-      const currentScale = Number.isFinite(panel.imageScale) ? panel.imageScale : 1
-      const nextScale = Math.max(MIN_PANEL_IMAGE_SCALE, Math.min(MAX_PANEL_IMAGE_SCALE, currentScale * (e.deltaY < 0 ? 1.08 : 0.92)))
-
-      const rect = canvasRef.current?.getBoundingClientRect()
-      const imgEl = canvasRef.current?.querySelector('img')
-      const clamped = clampPanelImageOffset({
-        frameWidth: rect?.width,
-        frameHeight: rect?.height,
-        naturalWidth: imgEl?.naturalWidth,
-        naturalHeight: imgEl?.naturalHeight,
-        scale: nextScale,
-        offsetX: panel.imageOffsetX ?? 0,
-        offsetY: panel.imageOffsetY ?? 0,
-      })
-
-      updatePanelLive(panel.id, {
-        imageScale: Number(nextScale.toFixed(3)),
-        imageOffsetX: clamped.offsetX,
-        imageOffsetY: clamped.offsetY,
-      })
-      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
-      wheelTimerRef.current = setTimeout(commitWheelZoom, 350)
-    }
-
-    wheelTarget.addEventListener('wheel', handleWheel, { passive: false, capture: true })
-    return () => wheelTarget.removeEventListener('wheel', handleWheel, true)
-  }, [canvasRef, commitWheelZoom, getHistorySnapshot, panel.id, panel.imageScale, panel.imageOffsetX, panel.imageOffsetY, updatePanelLive])
+  // Wheel no longer touches the image crop here — in the bubble editor the
+  // wheel zooms the whole editing view (see the viewZoom handling in
+  // PanelEditModal). Image crop zoom stays on the +/− buttons below.
 
   // Pointer Events (not plain mouse events) so this works with touch drags
   // too. This layer previously used mouse events; that wasn't what caused
@@ -520,7 +465,6 @@ function PanelImageInteractionLayer({ panel, canvasRef, onClickPoint }) {
     if (e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
-    commitWheelZoom()
 
     const rect = canvasRef.current?.getBoundingClientRect()
     if (!rect) {
@@ -593,7 +537,7 @@ function PanelImageInteractionLayer({ panel, canvasRef, onClickPoint }) {
       ref={layerRef}
       className="absolute inset-0 touch-none"
       style={{ zIndex: 1, cursor: 'grab' }}
-      title="Drag to reframe - Wheel to zoom - Click to place bubble"
+      title="Drag to reframe - Click to place bubble"
       onPointerDown={handlePointerDown}
     />
   )
@@ -640,7 +584,7 @@ function PanelImageZoomControls({ panel, canvasRef }) {
     >
       <button
         type="button"
-        title="Zoom out"
+        title="Zoom image crop out"
         className="w-5 h-5 flex items-center justify-center text-white text-xs leading-none rounded hover:bg-white/20"
         onClick={() => applyZoom(1 / 1.2)}
       >
@@ -648,7 +592,7 @@ function PanelImageZoomControls({ panel, canvasRef }) {
       </button>
       <button
         type="button"
-        title="Reset pan & zoom"
+        title="Reset image crop"
         className="w-5 h-5 flex items-center justify-center text-white text-xs leading-none rounded hover:bg-white/20"
         onClick={resetView}
       >
@@ -656,7 +600,7 @@ function PanelImageZoomControls({ panel, canvasRef }) {
       </button>
       <button
         type="button"
-        title="Zoom in"
+        title="Zoom image crop in"
         className="w-5 h-5 flex items-center justify-center text-white text-xs leading-none rounded hover:bg-white/20"
         onClick={() => applyZoom(1.2)}
       >
@@ -1019,13 +963,45 @@ export default function PanelEditModal() {
   const [styleDefaults, setStyleDefaults] = useState(loadStyleDefaults)
   const [defaultBubbleStyle, setDefaultBubbleStyle] = useState(loadDefaultStyle)
   const [quickAddFill, setQuickAddFill] = useState(QUICK_BUBBLE_COLORS[0])
+  const [viewZoom, setViewZoom] = useState(1)
   const canvasRef = useRef(null)
+  const viewportRef = useRef(null)
 
   useEffect(() => {
     if (panelEditModalOpen) {
       setSelectedBubbleId(panelEditModalInitialBubble ?? null)
     }
   }, [panelEditModalOpen, panelEditModalInitialBubble])
+
+  // Start each editing session with the panel fitted to the viewport; the
+  // wheel and the view-zoom buttons take it from there.
+  useEffect(() => {
+    if (!panelEditModalOpen) return
+    const viewport = viewportRef.current
+    const canvas = canvasRef.current
+    if (!viewport || !canvas || !canvas.offsetWidth || !canvas.offsetHeight) return
+    const fit = Math.min(
+      (viewport.clientWidth - 48) / canvas.offsetWidth,
+      (viewport.clientHeight - 48) / canvas.offsetHeight,
+    )
+    setViewZoom(Math.max(0.3, Math.min(1, fit)))
+  }, [panelEditModalOpen, panelEditModalPanelId])
+
+  // Wheel over the canvas area zooms the editing view — bubbles, handles,
+  // and image together — never the image crop (that's the +/− overlay on
+  // the canvas). Native listener because React's onWheel can't preventDefault.
+  useEffect(() => {
+    if (!panelEditModalOpen) return undefined
+    const viewport = viewportRef.current
+    if (!viewport) return undefined
+    const onWheel = (e) => {
+      if (e.target?.closest?.('input, textarea, select, button')) return
+      e.preventDefault()
+      setViewZoom(z => Math.max(0.3, Math.min(3, z * (e.deltaY < 0 ? 1.08 : 1 / 1.08))))
+    }
+    viewport.addEventListener('wheel', onWheel, { passive: false })
+    return () => viewport.removeEventListener('wheel', onWheel)
+  }, [panelEditModalOpen])
 
   useEffect(() => {
     localStorage.setItem(STYLE_DEFAULTS_KEY, JSON.stringify(styleDefaults))
@@ -1044,8 +1020,14 @@ export default function PanelEditModal() {
     const onKeyDown = (e) => {
       if (isEditableTarget(e.target)) return
       const activePanel = pages.flatMap(pg => pg.panels).find(p => p.id === panelEditModalPanelId)
-      if (!e.ctrlKey) return
       const activeBubble = activePanel?.bubbles.find(b => b.id === selectedBubbleId)
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && activeBubble) {
+        e.preventDefault()
+        removeBubble(activePanel.id, activeBubble.id)
+        setSelectedBubbleId(null)
+        return
+      }
+      if (!e.ctrlKey) return
       if (e.key.toLowerCase() === 'c' && activeBubble) {
         e.preventDefault()
         setStyleClipboard(extractBubbleStyle(activeBubble))
@@ -1059,7 +1041,7 @@ export default function PanelEditModal() {
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [panelEditModalOpen, pages, panelEditModalPanelId, selectedBubbleId, styleClipboard, updateBubble])
+  }, [panelEditModalOpen, pages, panelEditModalPanelId, selectedBubbleId, styleClipboard, updateBubble, removeBubble])
 
   if (!panelEditModalOpen) return null
 
@@ -1144,6 +1126,9 @@ export default function PanelEditModal() {
   }
 
   const addBubbleAtPoint = (clientX, clientY) => {
+    // Ignore the click the browser synthesizes right after a bubble/handle
+    // drag ends over the canvas — only deliberate clicks place bubbles.
+    if (Date.now() - lastBubbleDragEndAt < 350) return
     const canvas = canvasRef.current
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
@@ -1217,7 +1202,7 @@ export default function PanelEditModal() {
               Panel {panelIdx + 1} - {page.title}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5 hidden sm:block">
-              Click the canvas to place a bubble. Drag bubbles to reposition.
+              Click the canvas to place a bubble · Drag to reposition · Del removes the selected bubble · Wheel zooms the view.
             </p>
           </div>
           <button
@@ -1229,7 +1214,20 @@ export default function PanelEditModal() {
         </div>
 
         <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-          <div className="flex-1 min-h-0 bg-gray-800 flex items-center justify-center overflow-auto p-3 sm:p-6">
+          <div className="relative flex-1 min-h-0">
+            {/* Scroll viewport: the sizing wrapper reserves the zoomed
+                footprint (margin auto centers small content but keeps large
+                content scrollable, unlike flex centering), while the canvas
+                keeps its layout size and is visually scaled by viewZoom. */}
+            <div ref={viewportRef} className="absolute inset-0 bg-gray-800 overflow-auto p-3 sm:p-6 flex">
+            <div
+              style={{
+                margin: 'auto',
+                width: previewSize.width * viewZoom,
+                height: previewSize.height * viewZoom,
+                flexShrink: 0,
+              }}
+            >
             <div
               ref={canvasRef}
               data-panel-canvas
@@ -1237,8 +1235,8 @@ export default function PanelEditModal() {
               style={{
                 width: previewSize.width,
                 height: previewSize.height,
-                maxWidth: '100%',
-                maxHeight: '100%',
+                transform: `scale(${viewZoom})`,
+                transformOrigin: 'top left',
                 background: hasPanelImage ? '#000' : '#f8f8f8',
                 border: '3px solid #1f2937',
                 cursor: 'crosshair',
@@ -1299,10 +1297,42 @@ export default function PanelEditModal() {
                     onMove={(bubbleId, pos) => updateBubbleLive(panel.id, bubbleId, pos)}
                     onTailUpdate={(bubbleId, updates) => handleBubbleLiveUpdate(bubble, updates)}
                     onResize={(bubbleId, updates) => handleBubbleLiveUpdate(bubble, updates)}
-                    onDelete={handleRemoveBubble}
                   />
                 ))}
               </div>
+            </div>
+            </div>
+            </div>
+
+            {/* View zoom — zooms the editing view only, never the image crop */}
+            <div
+              className="absolute top-2 right-2 flex items-center gap-0.5 rounded-md bg-black/60 px-1 py-1"
+              style={{ zIndex: 7 }}
+              title="View zoom — only zooms the editor view, not the image"
+            >
+              <button
+                type="button"
+                className="w-5 h-5 flex items-center justify-center text-white text-xs leading-none rounded hover:bg-white/20"
+                onClick={() => setViewZoom(z => Math.max(0.3, z / 1.2))}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="h-5 px-1.5 flex items-center justify-center text-white leading-none rounded hover:bg-white/20"
+                style={{ fontSize: 10 }}
+                title="Reset view zoom to 100%"
+                onClick={() => setViewZoom(1)}
+              >
+                {Math.round(viewZoom * 100)}%
+              </button>
+              <button
+                type="button"
+                className="w-5 h-5 flex items-center justify-center text-white text-xs leading-none rounded hover:bg-white/20"
+                onClick={() => setViewZoom(z => Math.min(3, z * 1.2))}
+              >
+                +
+              </button>
             </div>
           </div>
 
