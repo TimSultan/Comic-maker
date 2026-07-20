@@ -83,7 +83,7 @@ function getImageResolutionOptions(imageModel) {
 
 // ─── Shared: image upload helper ────────────────────────────────
 
-function ImageUploadButton({ onImage, label = '+ Add Image' }) {
+function ImageUploadButton({ onImage, label = '+ Add Image', disabled = false }) {
   const ref = useRef()
   const handleFile = (e) => {
     const file = e.target.files[0]
@@ -95,10 +95,13 @@ function ImageUploadButton({ onImage, label = '+ Add Image' }) {
   }
   return (
     <>
-      <input ref={ref} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+      <input ref={ref} type="file" accept="image/*" className="hidden" onChange={handleFile} disabled={disabled} />
       <button
-        className="text-xs px-2.5 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
-        onClick={() => ref.current.click()}
+        className={`text-xs px-2.5 py-1 rounded transition-colors ${
+          disabled ? 'bg-gray-800 text-gray-600 cursor-not-allowed' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+        }`}
+        onClick={() => !disabled && ref.current.click()}
+        disabled={disabled}
       >
         {label}
       </button>
@@ -291,7 +294,7 @@ function resolveCharacterForPanel(character, panel) {
   }
 }
 
-export function ReferenceImagePicker({ open, images, selectedIds, onToggle, onClose, maxSelected = null }) {
+export function ReferenceImagePicker({ open, images, selectedIds, onToggle, onClose, maxSelected = null, onUpload = null }) {
   if (!open) return null
 
   const limitReached = maxSelected != null && selectedIds.length >= maxSelected
@@ -302,27 +305,35 @@ export function ReferenceImagePicker({ open, images, selectedIds, onToggle, onCl
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
       <div className="w-[680px] max-w-[92vw] max-h-[82vh] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-700">
           <div>
             <h3 className="text-sm font-semibold text-white">Select Reference Images</h3>
             <p className="text-xs text-gray-500 mt-0.5">
               {selectedIds.length}{maxSelected != null ? ` / ${maxSelected}` : ''} selected
             </p>
           </div>
-          <button
-            className="w-8 h-8 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white"
-            onClick={onClose}
-          >
-            X
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {onUpload && (
+              <ImageUploadButton label="+ Upload" onImage={onUpload} disabled={limitReached} />
+            )}
+            <button
+              className="w-8 h-8 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white"
+              onClick={onClose}
+            >
+              X
+            </button>
+          </div>
         </div>
 
         {images.length === 0 ? (
           <div className="p-8 text-center text-xs text-gray-500">
-            No images in this project yet. Add character references, style references, or generate panels first.
+            No images in this project yet. Upload one above, or add character references, style references, or generate panels first.
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-2 p-3 overflow-y-auto">
+          <div
+            className="grid gap-1.5 p-3 overflow-y-auto"
+            style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(76px, 1fr))' }}
+          >
             {images.map(image => {
               const selected = selectedIds.includes(image.id)
               const disabled = !selected && limitReached
@@ -330,7 +341,8 @@ export function ReferenceImagePicker({ open, images, selectedIds, onToggle, onCl
                 <button
                   key={image.id}
                   disabled={disabled}
-                  className={`text-left rounded-md border overflow-hidden transition-all ${
+                  title={`${image.label} — ${image.source}`}
+                  className={`group relative aspect-square rounded-md border overflow-hidden transition-all ${
                     selected
                       ? 'border-purple-500 bg-purple-950/40'
                       : disabled
@@ -339,18 +351,17 @@ export function ReferenceImagePicker({ open, images, selectedIds, onToggle, onCl
                   }`}
                   onClick={() => onToggle(image.id)}
                 >
-                  <div className="relative aspect-square bg-gray-950 flex items-center justify-center">
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-950">
                     <StoredImage src={image.url} assetId={image.assetId} alt="" className="max-w-full max-h-full object-contain" />
-                    {selected && (
-                      <span className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-purple-600 text-white text-xs flex items-center justify-center">
-                        ✓
-                      </span>
-                    )}
                   </div>
-                  <div className="p-2">
-                    <div className="text-xs font-medium text-gray-200 truncate">{image.label}</div>
-                    <div className="text-xs text-gray-500">{image.source}</div>
-                  </div>
+                  {selected && (
+                    <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-purple-600 text-white text-[10px] flex items-center justify-center">
+                      ✓
+                    </span>
+                  )}
+                  <span className="absolute inset-x-0 bottom-0 truncate bg-black/70 px-1 text-[9px] leading-4 text-white opacity-0 transition-opacity group-hover:opacity-100">
+                    {image.label}
+                  </span>
                 </button>
               )
             })}
@@ -384,7 +395,7 @@ function PanelTab() {
   const allCharacters    = useComicStore(s => s.characters)
   const styleReferences  = useComicStore(s => s.styleReferences)
   const projectImages    = useComicStore(s => s.projectImages)
-  const { updatePanel, setPanelCount, setPageLayout, openPanelEditModal, setImageModel, setImageQuality, setPanelCharacterLook } = useComicStore()
+  const { updatePanel, setPanelCount, setPageLayout, openPanelEditModal, setImageModel, setImageQuality, setPanelCharacterLook, addProjectImage } = useComicStore()
 
   const [genState, setGenState] = useState({ loading: false, error: '' })
   const [referencePickerOpen, setReferencePickerOpen] = useState(false)
@@ -418,6 +429,13 @@ function PanelTab() {
         ? current.filter(id => id !== imageId)
         : [...current, imageId],
     })
+  }
+
+  const handleUploadReference = async (dataUrl) => {
+    const assetId = await putImageAsset({ dataUrl, source: 'project', label: 'Reference' })
+    const id = uid()
+    addProjectImage({ id, imageAssetId: assetId, name: 'Reference' })
+    handleReferenceToggle(`project:${id}`)
   }
 
   const generateImageForPanel = async (targetPanel, targetPage, { apiKey, geminiApiKey, imageSize, imageResolution, freshGenerate = false }) => {
@@ -1030,6 +1048,7 @@ function PanelTab() {
         selectedIds={selectedReferenceIds}
         onToggle={handleReferenceToggle}
         onClose={() => setReferencePickerOpen(false)}
+        onUpload={handleUploadReference}
       />
 
     </div>
@@ -1131,6 +1150,7 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
   const pages = useComicStore(s => s.pages)
   const styleReferences = useComicStore(s => s.styleReferences)
   const projectImages = useComicStore(s => s.projectImages)
+  const { addProjectImage } = useComicStore()
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState('')
   const [expanded, setExpanded] = useState(false)
@@ -1163,6 +1183,13 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
     }
     if (referenceIds.length >= MAX_REFERENCE_IMAGES) return
     onUpdate({ referenceImageIds: [...referenceIds, imageId] })
+  }
+
+  const handleUploadReference = async (dataUrl) => {
+    const assetId = await putImageAsset({ dataUrl, source: 'project', label: 'Reference' })
+    const id = uid()
+    addProjectImage({ id, imageAssetId: assetId, name: 'Reference' })
+    toggleReference(`project:${id}`)
   }
 
   const selectMain = (img) => {
@@ -1353,6 +1380,7 @@ function CharacterCard({ char, onUpdate, onRemove, onManageLooks }) {
         onToggle={toggleReference}
         onClose={() => setReferencePickerOpen(false)}
         maxSelected={MAX_REFERENCE_IMAGES}
+        onUpload={handleUploadReference}
       />
 
       {/* Name row */}
