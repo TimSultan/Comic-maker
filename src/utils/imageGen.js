@@ -187,6 +187,29 @@ function extractGeminiImage(data) {
   return null
 }
 
+// --- Explain why Gemini responded 200 OK but with no image --------
+// A blocked/refused request still returns res.ok: true, so the only way to
+// surface the *real* reason (safety block, refusal text, non-STOP finish
+// reason) is to read it out of the response body ourselves.
+function extractGeminiFailureReason(data) {
+  if (!data) return null
+  const blockReason = data.promptFeedback?.blockReason
+  if (blockReason) {
+    const blockMsg = data.promptFeedback?.blockReasonMessage
+    return `Blocked by Gemini (${blockReason})${blockMsg ? `: ${blockMsg}` : '.'}`
+  }
+  const candidate = data.candidates?.[0]
+  const textPart = candidate?.content?.parts?.find(p => p.text)?.text?.trim()
+  const finishReason = candidate?.finishReason
+  if (textPart) {
+    return finishReason && finishReason !== 'STOP' ? `${textPart} (${finishReason})` : textPart
+  }
+  if (finishReason && finishReason !== 'STOP') {
+    return `Gemini stopped without returning an image (reason: ${finishReason}).`
+  }
+  return null
+}
+
 // --- Google Gemini: Interactions API (multi-turn) ----------------
 async function callInteractionsAPI({ prompt, apiKey, model, size, imageResolution, previousInteractionId }) {
   const body = {
@@ -271,8 +294,14 @@ async function generateGemini({ prompt, apiKey, model, size, imageResolution = '
     }
   }
 
-  // Surface the original Interactions API error if both fail
-  const errMsg = intResult.error ?? 'No image in Gemini response.'
+  // Both attempts returned 200 OK with no image — dig the real reason
+  // (safety block, refusal text, non-STOP finish reason) out of whichever
+  // response has one, instead of showing a generic "no image" message.
+  const errMsg =
+    extractGeminiFailureReason(gcResult.data) ??
+    intResult.error ??
+    (intResult.ok ? extractGeminiFailureReason(intResult.data) : null) ??
+    'No image in Gemini response.'
   throw new Error(errMsg)
 }
 
@@ -296,7 +325,10 @@ async function generateImagen({ prompt, apiKey, model, size }) {
     throw new Error(msg + code)
   }
   const b64  = data.predictions?.[0]?.bytesBase64Encoded
-  if (!b64) throw new Error('No image in Google Imagen response.')
+  if (!b64) {
+    const filtered = data.predictions?.[0]?.raiFilteredReason
+    throw new Error(filtered ? `Blocked by Google Imagen: ${filtered}` : 'No image in Google Imagen response.')
+  }
   const mime = data.predictions?.[0]?.mimeType ?? 'image/png'
   return { imageUrl: `data:${mime};base64,${b64}`, interactionId: null }
 }

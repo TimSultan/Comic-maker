@@ -451,6 +451,11 @@ function PanelTab() {
         .map(c => resolveCharacterForPanel(c, targetPanel))
         .map(async c => ({ ...c, imageUrl: await resolveImageUrl(c.imageUrl, c.imageAssetId) })),
     )
+    // Style refs are stored as { url: null, assetId } once uploaded — resolve
+    // to a real data URL here, since generatePanelImage only looks at `.url`.
+    const resolvedStyleReferences = (await Promise.all(
+      styleReferences.map(async ref => ({ ...ref, url: await resolveImageUrl(ref.url, ref.assetId) })),
+    )).filter(ref => ref.url)
     const selectedPanelReferenceImages = assetImages.filter(image => (targetPanel.referenceImageIds ?? []).includes(image.id))
     const currentPanelImageUrl = await resolveImageUrl(targetPanel.imageUrl, targetPanel.imageAssetId)
     const currentImageReference = isEditingExistingImage && currentPanelImageUrl
@@ -486,7 +491,7 @@ function PanelTab() {
         perspective: targetPanel.perspective,
         globalStyle,
         characters: selectedChars,
-        styleReferences,
+        styleReferences: resolvedStyleReferences,
         imageReferences: [...currentImageReference, ...selectedImageReferences],
         referencePrompt: referenceInstructions,
         apiKey,
